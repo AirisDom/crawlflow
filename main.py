@@ -2,13 +2,22 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 
 from fastapi import FastAPI
-from sqlalchemy import ForeignKey, Text
+from sqlalchemy import ForeignKey, Text, event
 from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 DATABASE_URL = "sqlite+aiosqlite:///./crawlflow.db"
 
 engine = create_async_engine(DATABASE_URL, echo=False)
+
+
+@event.listens_for(engine.sync_engine, "connect")
+def enable_sqlite_fk(dbapi_conn, connection_record):
+    cursor = dbapi_conn.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
+
 async_session = async_sessionmaker(engine, expire_on_commit=False)
 
 
