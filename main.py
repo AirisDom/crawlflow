@@ -1,12 +1,13 @@
 import json
 from contextlib import asynccontextmanager
 from datetime import datetime
+from collections.abc import AsyncGenerator
 from typing import Literal
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from pydantic import BaseModel, HttpUrl, field_validator
 from sqlalchemy import ForeignKey, Text, event
-from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncAttrs, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 DATABASE_URL = "sqlite+aiosqlite:///./crawlflow.db"
@@ -119,6 +120,27 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    async with async_session() as session:
+        yield session
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.post("/api/pipelines", response_model=PipelineResponse, status_code=201)
+async def create_pipeline(
+    payload: PipelineCreate,
+    db: AsyncSession = Depends(get_db),
+) -> PipelineResponse:
+    pipeline = Pipeline(
+        name=payload.name,
+        target_url=str(payload.target_url),
+        selectors_json=payload.selectors_to_json(),
+    )
+    db.add(pipeline)
+    await db.commit()
+    await db.refresh(pipeline)
+    return PipelineResponse.from_orm_model(pipeline)
