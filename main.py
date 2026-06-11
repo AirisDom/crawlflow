@@ -1,7 +1,10 @@
+import json
 from contextlib import asynccontextmanager
 from datetime import datetime
+from typing import Literal
 
 from fastapi import FastAPI
+from pydantic import BaseModel, HttpUrl, field_validator
 from sqlalchemy import ForeignKey, Text, event
 from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -49,6 +52,57 @@ class JobRun(Base):
     error_message: Mapped[str | None] = mapped_column(Text, default=None)
 
     pipeline: Mapped["Pipeline"] = relationship(back_populates="job_runs")
+
+
+class SelectorConfig(BaseModel):
+    key: str
+    selector: str
+    attribute: Literal["text", "href", "src"]
+
+
+class PipelineCreate(BaseModel):
+    name: str
+    target_url: HttpUrl
+    selectors: list[SelectorConfig]
+
+    @field_validator("name")
+    @classmethod
+    def name_not_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("name cannot be empty")
+        return v.strip()
+
+    @field_validator("selectors")
+    @classmethod
+    def selectors_not_empty(cls, v: list[SelectorConfig]) -> list[SelectorConfig]:
+        if not v:
+            raise ValueError("at least one selector is required")
+        return v
+
+    def selectors_to_json(self) -> str:
+        return json.dumps([s.model_dump() for s in self.selectors])
+
+
+class PipelineResponse(BaseModel):
+    id: int
+    name: str
+    target_url: str
+    selectors: list[SelectorConfig]
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+    @classmethod
+    def from_orm_model(cls, pipeline: Pipeline) -> "PipelineResponse":
+        selectors_data = json.loads(pipeline.selectors_json)
+        selectors = [SelectorConfig(**s) for s in selectors_data]
+        return cls(
+            id=pipeline.id,
+            name=pipeline.name,
+            target_url=pipeline.target_url,
+            selectors=selectors,
+            created_at=pipeline.created_at,
+        )
 
 
 async def init_db():
