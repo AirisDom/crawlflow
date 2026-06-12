@@ -6,7 +6,7 @@ from typing import Literal
 
 from fastapi import Depends, FastAPI
 from pydantic import BaseModel, HttpUrl, field_validator
-from sqlalchemy import ForeignKey, Text, event
+from sqlalchemy import ForeignKey, Text, event, select, func
 from sqlalchemy.ext.asyncio import AsyncAttrs, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -106,6 +106,30 @@ class PipelineResponse(BaseModel):
         )
 
 
+class PipelineWithStatusResponse(BaseModel):
+    id: int
+    name: str
+    target_url: str
+    selectors: list[SelectorConfig]
+    created_at: datetime
+    latest_status: str | None
+
+    model_config = {"from_attributes": True}
+
+    @classmethod
+    def from_orm_with_status(cls, pipeline: Pipeline, latest_status: str | None) -> "PipelineWithStatusResponse":
+        selectors_data = json.loads(pipeline.selectors_json)
+        selectors = [SelectorConfig(**s) for s in selectors_data]
+        return cls(
+            id=pipeline.id,
+            name=pipeline.name,
+            target_url=pipeline.target_url,
+            selectors=selectors,
+            created_at=pipeline.created_at,
+            latest_status=latest_status,
+        )
+
+
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -144,3 +168,34 @@ async def create_pipeline(
     await db.commit()
     await db.refresh(pipeline)
     return PipelineResponse.from_orm_model(pipeline)
+
+
+@app.get("/api/pipelines", response_model=list[PipelineWithStatusResponse])
+async def list_pipelines(
+    db: AsyncSession = Depends(get_db),
+) -> list[PipelineWithStatusResponse]:
+    max_id_subquery = (
+        select(JobRun.pipeline_id, func.max(JobRun.id).label("max_id"))
+        .group_by(JobRun.pipeline_id)
+        .subquery()
+    )
+
+    latest_status_subquery = (
+        select(JobRun.pipeline_id, JobRun.status)
+        .join(max_id_subquery, JobRun.id == max_id_subquery.c.max_id)
+        .subquery()
+    )
+
+    query = (
+        select(Pipeline, latest_status_subquery.c.status)
+        .outerjoin(latest_status_subquery, Pipeline.id == latest_status_subquery.c.pipeline_id)
+        .order_by(Pipeline.id)
+    )
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    return [
+        PipelineWithStatusResponse.from_orm_with_status(pipeline, latest_status)
+        for pipeline, latest_status in rows
+    ]
