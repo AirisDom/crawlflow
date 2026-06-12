@@ -4,6 +4,8 @@ from datetime import datetime
 from collections.abc import AsyncGenerator
 from typing import Literal
 
+import httpx
+from bs4 import BeautifulSoup
 from fastapi import Depends, FastAPI
 from pydantic import BaseModel, HttpUrl, field_validator
 from sqlalchemy import ForeignKey, Text, event, select, func
@@ -11,6 +13,17 @@ from sqlalchemy.ext.asyncio import AsyncAttrs, AsyncSession, async_sessionmaker,
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 DATABASE_URL = "sqlite+aiosqlite:///./crawlflow.db"
+
+HTTPX_CONNECT_TIMEOUT = 10.0
+HTTPX_READ_TIMEOUT = 30.0
+HTTPX_WRITE_TIMEOUT = 10.0
+HTTPX_POOL_TIMEOUT = 10.0
+HTTPX_TIMEOUT = httpx.Timeout(
+    connect=HTTPX_CONNECT_TIMEOUT,
+    read=HTTPX_READ_TIMEOUT,
+    write=HTTPX_WRITE_TIMEOUT,
+    pool=HTTPX_POOL_TIMEOUT,
+)
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 
