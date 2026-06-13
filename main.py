@@ -183,6 +183,39 @@ async def create_pipeline(
     return PipelineResponse.from_orm_model(pipeline)
 
 
+async def scrape_url(url: str, selectors: list[SelectorConfig]) -> dict[str, list[str]]:
+    timeout = httpx.Timeout(
+        connect=HTTPX_CONNECT_TIMEOUT,
+        read=HTTPX_READ_TIMEOUT,
+        write=HTTPX_WRITE_TIMEOUT,
+        pool=HTTPX_POOL_TIMEOUT,
+    )
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.get(url)
+        response.raise_for_status()
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    extracted_data: dict[str, list[str]] = {}
+
+    for selector_config in selectors:
+        elements = soup.select(selector_config.selector)
+        values: list[str] = []
+        for element in elements:
+            if selector_config.attribute == "text":
+                values.append(element.get_text(strip=True))
+            elif selector_config.attribute == "href":
+                href = element.get("href")
+                if href:
+                    values.append(str(href))
+            elif selector_config.attribute == "src":
+                src = element.get("src")
+                if src:
+                    values.append(str(src))
+        extracted_data[selector_config.key] = values
+
+    return extracted_data
+
+
 @app.get("/api/pipelines", response_model=list[PipelineWithStatusResponse])
 async def list_pipelines(
     db: AsyncSession = Depends(get_db),
