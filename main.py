@@ -7,7 +7,7 @@ from typing import Literal
 
 import httpx
 from bs4 import BeautifulSoup
-from fastapi import Depends, FastAPI
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from pydantic import BaseModel, HttpUrl, field_validator
 from sqlalchemy import ForeignKey, Text, event, select, func
 from sqlalchemy.ext.asyncio import AsyncAttrs, AsyncSession, async_sessionmaker, create_async_engine
@@ -142,6 +142,12 @@ class PipelineWithStatusResponse(BaseModel):
             created_at=pipeline.created_at,
             latest_status=latest_status,
         )
+
+
+class TriggerResponse(BaseModel):
+    job_id: int
+    pipeline_id: int
+    status: str
 
 
 async def init_db():
@@ -281,3 +287,24 @@ async def list_pipelines(
         PipelineWithStatusResponse.from_orm_with_status(pipeline, latest_status)
         for pipeline, latest_status in rows
     ]
+
+
+@app.post("/api/pipelines/{pipeline_id}/trigger", response_model=TriggerResponse, status_code=202)
+async def trigger_pipeline(
+    pipeline_id: int,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+) -> TriggerResponse:
+    result = await db.execute(select(Pipeline).where(Pipeline.id == pipeline_id))
+    pipeline = result.scalar_one_or_none()
+    if pipeline is None:
+        raise HTTPException(status_code=404, detail=f"Pipeline with id {pipeline_id} not found")
+
+    job_run = JobRun(pipeline_id=pipeline_id, status="PENDING")
+    db.add(job_run)
+    await db.commit()
+    await db.refresh(job_run)
+
+    background_tasks.add_task(run_pipeline_job, pipeline_id, job_run.id)
+
+    return TriggerResponse(job_id=job_run.id, pipeline_id=pipeline_id, status=job_run.status)
