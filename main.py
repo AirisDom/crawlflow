@@ -1,4 +1,5 @@
 import json
+import traceback
 from contextlib import asynccontextmanager
 from datetime import datetime
 from collections.abc import AsyncGenerator
@@ -214,6 +215,41 @@ async def scrape_url(url: str, selectors: list[SelectorConfig]) -> dict[str, lis
         extracted_data[selector_config.key] = values
 
     return extracted_data
+
+
+async def run_pipeline_job(pipeline_id: int, job_run_id: int) -> None:
+    async with async_session() as db:
+        result = await db.execute(select(JobRun).where(JobRun.id == job_run_id))
+        job_run = result.scalar_one_or_none()
+        if job_run is None:
+            return
+
+        result = await db.execute(select(Pipeline).where(Pipeline.id == pipeline_id))
+        pipeline = result.scalar_one_or_none()
+        if pipeline is None:
+            job_run.status = "FAILED"
+            job_run.completed_at = datetime.utcnow()
+            job_run.error_message = f"Pipeline with id {pipeline_id} not found"
+            await db.commit()
+            return
+
+        job_run.status = "RUNNING"
+        job_run.started_at = datetime.utcnow()
+        await db.commit()
+
+        try:
+            selectors_data = json.loads(pipeline.selectors_json)
+            selectors = [SelectorConfig(**s) for s in selectors_data]
+            extracted = await scrape_url(pipeline.target_url, selectors)
+            job_run.extracted_data = json.dumps(extracted)
+            job_run.status = "COMPLETED"
+            job_run.completed_at = datetime.utcnow()
+        except Exception:
+            job_run.status = "FAILED"
+            job_run.completed_at = datetime.utcnow()
+            job_run.error_message = traceback.format_exc()
+
+        await db.commit()
 
 
 @app.get("/api/pipelines", response_model=list[PipelineWithStatusResponse])
