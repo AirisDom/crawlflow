@@ -373,3 +373,22 @@ async def trigger_pipeline(
     background_tasks.add_task(run_pipeline_job, pipeline_id, job_run.id)
 
     return TriggerResponse(job_id=job_run.id, pipeline_id=pipeline_id, status=job_run.status)
+
+
+@app.get("/api/history", response_model=list[HistoryResponse])
+async def get_history(
+    db: AsyncSession = Depends(get_db),
+) -> list[HistoryResponse]:
+    query = (
+        select(JobRun, Pipeline)
+        .join(Pipeline, JobRun.pipeline_id == Pipeline.id)
+        .order_by(JobRun.started_at.desc().nulls_last(), JobRun.id.desc())
+        .limit(30)
+    )
+    result = await db.execute(query)
+    rows = result.all()
+
+    return [
+        HistoryResponse.from_job_and_pipeline(job_run, pipeline)
+        for job_run, pipeline in rows
+    ]
