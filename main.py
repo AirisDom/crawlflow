@@ -8,6 +8,7 @@ from typing import Literal
 import httpx
 from bs4 import BeautifulSoup
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, HttpUrl, field_validator
 from sqlalchemy import ForeignKey, Text, event, select, func
 from sqlalchemy.ext.asyncio import AsyncAttrs, AsyncSession, async_sessionmaker, create_async_engine
@@ -237,6 +238,54 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+DASHBOARD_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="CrawlFlow - Web Scraping Pipeline Orchestrator">
+    <title>CrawlFlow Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <header class="mb-8">
+            <h1 class="text-3xl font-bold text-white">CrawlFlow</h1>
+            <p class="text-gray-400 mt-1">Web Scraping Pipeline Orchestrator</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <section id="control-desk" class="bg-gray-800 rounded-lg p-6 shadow-lg">
+                <h2 class="text-xl font-semibold text-white mb-4 border-b border-gray-700 pb-2">Control Desk</h2>
+                <div class="space-y-4">
+                    <p class="text-gray-400">Pipeline configuration form will be rendered here.</p>
+                </div>
+            </section>
+
+            <section id="orchestration-matrix" class="bg-gray-800 rounded-lg p-6 shadow-lg">
+                <h2 class="text-xl font-semibold text-white mb-4 border-b border-gray-700 pb-2">Orchestration Matrix</h2>
+                <div class="space-y-6">
+                    <div id="pipeline-grid">
+                        <h3 class="text-lg font-medium text-gray-300 mb-3">Active Pipelines</h3>
+                        <p class="text-gray-400">Pipeline tiles will be rendered here.</p>
+                    </div>
+                    <div id="history-timeline">
+                        <h3 class="text-lg font-medium text-gray-300 mb-3">Execution History</h3>
+                        <p class="text-gray-400">Job history timeline will be rendered here.</p>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
+</body>
+</html>"""
+
+
+@app.get("/", response_class=HTMLResponse)
+async def dashboard():
+    return HTMLResponse(content=DASHBOARD_HTML)
 
 
 @app.post("/api/pipelines", response_model=PipelineResponse, status_code=201)
