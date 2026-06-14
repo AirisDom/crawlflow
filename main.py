@@ -259,9 +259,60 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <section id="control-desk" class="bg-gray-800 rounded-lg p-6 shadow-lg">
                 <h2 class="text-xl font-semibold text-white mb-4 border-b border-gray-700 pb-2">Control Desk</h2>
-                <div class="space-y-4">
-                    <p class="text-gray-400">Pipeline configuration form will be rendered here.</p>
-                </div>
+                <form id="pipeline-form" class="space-y-4">
+                    <div>
+                        <label for="pipeline-name" class="block text-sm font-medium text-gray-300 mb-1">Pipeline Name</label>
+                        <input type="text" id="pipeline-name" name="name" required
+                            class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200"
+                            placeholder="Enter pipeline name">
+                    </div>
+                    <div>
+                        <label for="target-url" class="block text-sm font-medium text-gray-300 mb-1">Target URL</label>
+                        <input type="url" id="target-url" name="target_url" required
+                            class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200"
+                            placeholder="https://example.com">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">Selectors</label>
+                        <div id="selectors-container" class="space-y-2">
+                            <div class="selector-row flex gap-2 items-center">
+                                <input type="text" name="selector_key" required
+                                    class="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                                    placeholder="Key name">
+                                <input type="text" name="selector_css" required
+                                    class="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                                    placeholder="CSS selector">
+                                <select name="selector_attr"
+                                    class="px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm">
+                                    <option value="text">Text</option>
+                                    <option value="href">href</option>
+                                    <option value="src">src</option>
+                                </select>
+                                <button type="button" onclick="removeSelector(this)" class="px-2 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-white transition duration-200">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                        <button type="button" onclick="addSelector()"
+                            class="mt-2 px-3 py-1.5 bg-gray-600 hover:bg-gray-500 rounded-lg text-sm text-white transition duration-200 flex items-center gap-1">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                            </svg>
+                            Add Selector
+                        </button>
+                    </div>
+                    <div id="form-feedback" class="hidden rounded-lg p-3 text-sm"></div>
+                    <button type="submit" id="submit-btn"
+                        class="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 disabled:cursor-not-allowed rounded-lg text-white font-medium transition duration-200 flex items-center justify-center gap-2">
+                        <span>Create Pipeline</span>
+                        <svg id="submit-spinner" class="hidden animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </button>
+                </form>
             </section>
 
             <section id="orchestration-matrix" class="bg-gray-800 rounded-lg p-6 shadow-lg">
@@ -279,6 +330,115 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             </section>
         </div>
     </div>
+
+    <script>
+        function addSelector() {
+            const container = document.getElementById('selectors-container');
+            const row = document.createElement('div');
+            row.className = 'selector-row flex gap-2 items-center';
+            row.innerHTML = `
+                <input type="text" name="selector_key" required
+                    class="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                    placeholder="Key name">
+                <input type="text" name="selector_css" required
+                    class="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                    placeholder="CSS selector">
+                <select name="selector_attr"
+                    class="px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm">
+                    <option value="text">Text</option>
+                    <option value="href">href</option>
+                    <option value="src">src</option>
+                </select>
+                <button type="button" onclick="removeSelector(this)" class="px-2 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-white transition duration-200">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            `;
+            container.appendChild(row);
+        }
+
+        function removeSelector(button) {
+            const container = document.getElementById('selectors-container');
+            if (container.children.length > 1) {
+                button.closest('.selector-row').remove();
+            }
+        }
+
+        function showFeedback(message, isError) {
+            const feedback = document.getElementById('form-feedback');
+            feedback.textContent = message;
+            feedback.className = isError
+                ? 'rounded-lg p-3 text-sm bg-red-900/50 border border-red-600 text-red-200'
+                : 'rounded-lg p-3 text-sm bg-emerald-900/50 border border-emerald-600 text-emerald-200';
+            feedback.classList.remove('hidden');
+            if (!isError) {
+                setTimeout(() => feedback.classList.add('hidden'), 5000);
+            }
+        }
+
+        function setLoading(loading) {
+            const btn = document.getElementById('submit-btn');
+            const spinner = document.getElementById('submit-spinner');
+            btn.disabled = loading;
+            spinner.classList.toggle('hidden', !loading);
+        }
+
+        document.getElementById('pipeline-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            setLoading(true);
+            document.getElementById('form-feedback').classList.add('hidden');
+
+            const name = document.getElementById('pipeline-name').value.trim();
+            const targetUrl = document.getElementById('target-url').value.trim();
+
+            const selectorRows = document.querySelectorAll('.selector-row');
+            const selectors = [];
+            for (const row of selectorRows) {
+                const key = row.querySelector('[name="selector_key"]').value.trim();
+                const selector = row.querySelector('[name="selector_css"]').value.trim();
+                const attribute = row.querySelector('[name="selector_attr"]').value;
+                if (key && selector) {
+                    selectors.push({ key, selector, attribute });
+                }
+            }
+
+            if (selectors.length === 0) {
+                showFeedback('At least one selector is required', true);
+                setLoading(false);
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/pipelines', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, target_url: targetUrl, selectors })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    showFeedback(`Pipeline "${data.name}" created successfully (ID: ${data.id})`, false);
+                    document.getElementById('pipeline-form').reset();
+                    const container = document.getElementById('selectors-container');
+                    while (container.children.length > 1) {
+                        container.lastChild.remove();
+                    }
+                    container.querySelector('[name="selector_key"]').value = '';
+                    container.querySelector('[name="selector_css"]').value = '';
+                    container.querySelector('[name="selector_attr"]').value = 'text';
+                } else {
+                    const errorData = await response.json();
+                    const errorMsg = errorData.detail || JSON.stringify(errorData);
+                    showFeedback(`Error: ${errorMsg}`, true);
+                }
+            } catch (err) {
+                showFeedback(`Network error: ${err.message}`, true);
+            } finally {
+                setLoading(false);
+            }
+        });
+    </script>
 </body>
 </html>"""
 
