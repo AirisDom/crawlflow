@@ -148,6 +148,71 @@ class TriggerResponse(BaseModel):
     job_id: int
     pipeline_id: int
     status: str
+    message: str = "Job scheduled successfully"
+
+
+class JobRunResponse(BaseModel):
+    id: int
+    pipeline_id: int
+    status: str
+    started_at: datetime | None
+    completed_at: datetime | None
+    extracted_data: dict | list | None
+    error_message: str | None
+
+    model_config = {"from_attributes": True}
+
+    @classmethod
+    def from_orm_model(cls, job_run: JobRun) -> "JobRunResponse":
+        extracted = None
+        if job_run.extracted_data:
+            try:
+                extracted = json.loads(job_run.extracted_data)
+            except json.JSONDecodeError:
+                extracted = None
+        return cls(
+            id=job_run.id,
+            pipeline_id=job_run.pipeline_id,
+            status=job_run.status,
+            started_at=job_run.started_at,
+            completed_at=job_run.completed_at,
+            extracted_data=extracted,
+            error_message=job_run.error_message,
+        )
+
+
+class HistoryResponse(BaseModel):
+    id: int
+    pipeline_id: int
+    pipeline_name: str
+    target_url: str
+    status: str
+    started_at: datetime | None
+    completed_at: datetime | None
+    extracted_data: dict | list | None
+    error_message: str | None
+
+    model_config = {"from_attributes": True}
+
+    @classmethod
+    def from_job_and_pipeline(cls, job_run: JobRun, pipeline: Pipeline) -> "HistoryResponse":
+        extracted = None
+        if job_run.extracted_data:
+            try:
+                extracted = json.loads(job_run.extracted_data)
+            except json.JSONDecodeError:
+                extracted = None
+        return cls(
+            id=job_run.id,
+            pipeline_id=job_run.pipeline_id,
+            pipeline_name=pipeline.name,
+            target_url=pipeline.target_url,
+            status=job_run.status,
+            started_at=job_run.started_at,
+            completed_at=job_run.completed_at,
+            extracted_data=extracted,
+            error_message=job_run.error_message,
+        )
 
 
 async def init_db():
