@@ -749,6 +749,10 @@ async def create_pipeline(
     return PipelineResponse.from_orm_model(pipeline)
 
 
+class ScrapingError(Exception):
+    pass
+
+
 async def scrape_url(url: str, selectors: list[SelectorConfig]) -> dict[str, list[str]]:
     timeout = httpx.Timeout(
         connect=HTTPX_CONNECT_TIMEOUT,
@@ -756,9 +760,34 @@ async def scrape_url(url: str, selectors: list[SelectorConfig]) -> dict[str, lis
         write=HTTPX_WRITE_TIMEOUT,
         pool=HTTPX_POOL_TIMEOUT,
     )
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.get(url)
-        response.raise_for_status()
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            response = await client.get(url)
+    except httpx.TimeoutException as e:
+        timeout_type = type(e).__name__
+        raise ScrapingError(
+            f"Request timed out while fetching '{url}': {timeout_type}. "
+            f"The server did not respond within the configured timeout limits "
+            f"(connect: {HTTPX_CONNECT_TIMEOUT}s, read: {HTTPX_READ_TIMEOUT}s)."
+        ) from e
+    except httpx.ConnectError as e:
+        raise ScrapingError(
+            f"Connection failed to '{url}': Unable to establish a connection. "
+            f"The host may be unreachable, the DNS lookup may have failed, "
+            f"or the connection was refused. Details: {e}"
+        ) from e
+    except httpx.RequestError as e:
+        error_type = type(e).__name__
+        raise ScrapingError(
+            f"Request error while fetching '{url}': {error_type}. Details: {e}"
+        ) from e
+
+    if not response.is_success:
+        raise ScrapingError(
+            f"HTTP error {response.status_code} ({response.reason_phrase}) "
+            f"while fetching '{url}'. Expected a successful response (2xx status code)."
+        )
 
     soup = BeautifulSoup(response.text, "html.parser")
     extracted_data: dict[str, list[str]] = {}
@@ -809,10 +838,14 @@ async def run_pipeline_job(pipeline_id: int, job_run_id: int) -> None:
             job_run.extracted_data = json.dumps(extracted)
             job_run.status = "COMPLETED"
             job_run.completed_at = datetime.utcnow()
+        except ScrapingError as e:
+            job_run.status = "FAILED"
+            job_run.completed_at = datetime.utcnow()
+            job_run.error_message = str(e)
         except Exception:
             job_run.status = "FAILED"
             job_run.completed_at = datetime.utcnow()
-            job_run.error_message = traceback.format_exc()
+            job_run.error_message = f"Unexpected error: {traceback.format_exc()}"
 
         await db.commit()
 
