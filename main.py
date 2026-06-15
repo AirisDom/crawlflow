@@ -519,8 +519,18 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         noMsg.classList.add('hidden');
                         container.innerHTML = pipelines.map(renderPipelineTile).join('');
                     }
+                    if (typeof pollingState !== 'undefined') {
+                        pollingState.pipelinesErrors = 0;
+                    }
+                } else {
+                    if (typeof pollingState !== 'undefined') {
+                        pollingState.pipelinesErrors++;
+                    }
                 }
             } catch (err) {
+                if (typeof pollingState !== 'undefined') {
+                    pollingState.pipelinesErrors++;
+                }
                 console.error('Failed to fetch pipelines:', err);
             }
         }
@@ -632,16 +642,87 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     } else {
                         tbody.innerHTML = history.map(renderHistoryRow).join('');
                     }
+                    if (typeof pollingState !== 'undefined') {
+                        pollingState.historyErrors = 0;
+                    }
+                } else {
+                    if (typeof pollingState !== 'undefined') {
+                        pollingState.historyErrors++;
+                    }
                 }
             } catch (err) {
+                if (typeof pollingState !== 'undefined') {
+                    pollingState.historyErrors++;
+                }
                 console.error('Failed to fetch history:', err);
             }
         }
 
-        fetchPipelines();
-        fetchHistory();
-        setInterval(fetchPipelines, 3000);
-        setInterval(fetchHistory, 3000);
+        const pollingState = {
+            pipelinesInterval: null,
+            historyInterval: null,
+            pipelinesErrors: 0,
+            historyErrors: 0,
+            maxErrors: 10,
+            pollInterval: 3000,
+            isPolling: false
+        };
+
+        function startPolling() {
+            if (pollingState.isPolling) return;
+            pollingState.isPolling = true;
+            pollingState.pipelinesErrors = 0;
+            pollingState.historyErrors = 0;
+
+            fetchPipelines();
+            fetchHistory();
+
+            pollingState.pipelinesInterval = setInterval(function() {
+                if (pollingState.pipelinesErrors >= pollingState.maxErrors) {
+                    console.warn('Stopping pipelines polling due to repeated errors');
+                    clearInterval(pollingState.pipelinesInterval);
+                    pollingState.pipelinesInterval = null;
+                    return;
+                }
+                fetchPipelines();
+            }, pollingState.pollInterval);
+
+            pollingState.historyInterval = setInterval(function() {
+                if (pollingState.historyErrors >= pollingState.maxErrors) {
+                    console.warn('Stopping history polling due to repeated errors');
+                    clearInterval(pollingState.historyInterval);
+                    pollingState.historyInterval = null;
+                    return;
+                }
+                fetchHistory();
+            }, pollingState.pollInterval);
+        }
+
+        function stopPolling() {
+            pollingState.isPolling = false;
+            if (pollingState.pipelinesInterval) {
+                clearInterval(pollingState.pipelinesInterval);
+                pollingState.pipelinesInterval = null;
+            }
+            if (pollingState.historyInterval) {
+                clearInterval(pollingState.historyInterval);
+                pollingState.historyInterval = null;
+            }
+        }
+
+        document.addEventListener('visibilitychange', function() {
+            if (document.hidden) {
+                stopPolling();
+            } else {
+                startPolling();
+            }
+        });
+
+        window.addEventListener('beforeunload', function() {
+            stopPolling();
+        });
+
+        startPolling();
     </script>
 </body>
 </html>"""
