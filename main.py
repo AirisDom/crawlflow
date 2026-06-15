@@ -326,7 +326,21 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     </div>
                     <div id="history-timeline">
                         <h3 class="text-lg font-medium text-gray-300 mb-3">Execution History</h3>
-                        <p class="text-gray-400">Job history timeline will be rendered here.</p>
+                        <div id="history-container" class="overflow-x-auto">
+                            <table class="w-full text-sm text-left">
+                                <thead class="text-xs text-gray-400 uppercase bg-gray-700/50">
+                                    <tr>
+                                        <th class="px-3 py-2 rounded-tl-lg">Pipeline</th>
+                                        <th class="px-3 py-2">Status</th>
+                                        <th class="px-3 py-2">Started</th>
+                                        <th class="px-3 py-2 rounded-tr-lg">Completed</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="history-tbody" class="divide-y divide-gray-700">
+                                    <tr><td colspan="4" class="px-3 py-4 text-gray-400 text-center">No job runs yet.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </section>
@@ -527,8 +541,107 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
         }
 
+        function formatDateTime(isoString) {
+            if (!isoString) return '-';
+            const date = new Date(isoString);
+            return date.toLocaleString('en-US', {
+                month: 'short', day: 'numeric',
+                hour: '2-digit', minute: '2-digit', second: '2-digit'
+            });
+        }
+
+        function toggleJobData(jobId) {
+            const dataRow = document.getElementById(`job-data-${jobId}`);
+            const toggleBtn = document.getElementById(`toggle-btn-${jobId}`);
+            if (dataRow.classList.contains('hidden')) {
+                dataRow.classList.remove('hidden');
+                toggleBtn.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                    </svg>`;
+            } else {
+                dataRow.classList.add('hidden');
+                toggleBtn.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                    </svg>`;
+            }
+        }
+
+        function renderHistoryRow(job) {
+            const hasData = job.status === 'COMPLETED' && job.extracted_data;
+            const hasError = job.status === 'FAILED' && job.error_message;
+            const isExpandable = hasData || hasError;
+
+            let expandButton = '';
+            if (isExpandable) {
+                expandButton = `
+                    <button id="toggle-btn-${job.id}" onclick="toggleJobData(${job.id})"
+                        class="ml-2 p-1 text-gray-400 hover:text-white transition duration-200" title="View details">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                        </svg>
+                    </button>`;
+            }
+
+            let dataContent = '';
+            if (hasData) {
+                dataContent = JSON.stringify(job.extracted_data, null, 2);
+            } else if (hasError) {
+                dataContent = job.error_message;
+            }
+
+            let expandableRow = '';
+            if (isExpandable) {
+                const bgColor = hasError ? 'bg-rose-900/20 border-rose-800' : 'bg-gray-900/50 border-gray-700';
+                expandableRow = `
+                    <tr id="job-data-${job.id}" class="hidden">
+                        <td colspan="4" class="px-3 py-2">
+                            <div class="${bgColor} border rounded-lg p-3 max-h-64 overflow-auto">
+                                <pre class="text-xs text-gray-300 whitespace-pre-wrap break-words font-mono">${dataContent}</pre>
+                            </div>
+                        </td>
+                    </tr>`;
+            }
+
+            return `
+                <tr class="hover:bg-gray-700/30 transition duration-150">
+                    <td class="px-3 py-3">
+                        <div class="flex items-center">
+                            <span class="text-white font-medium truncate max-w-[120px]" title="${job.pipeline_name}">${job.pipeline_name}</span>
+                            ${expandButton}
+                        </div>
+                    </td>
+                    <td class="px-3 py-3">${getStatusBadge(job.status)}</td>
+                    <td class="px-3 py-3 text-gray-400 text-xs">${formatDateTime(job.started_at)}</td>
+                    <td class="px-3 py-3 text-gray-400 text-xs">${formatDateTime(job.completed_at)}</td>
+                </tr>
+                ${expandableRow}
+            `;
+        }
+
+        async function fetchHistory() {
+            try {
+                const response = await fetch('/api/history');
+                if (response.ok) {
+                    const history = await response.json();
+                    const tbody = document.getElementById('history-tbody');
+
+                    if (history.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="4" class="px-3 py-4 text-gray-400 text-center">No job runs yet.</td></tr>';
+                    } else {
+                        tbody.innerHTML = history.map(renderHistoryRow).join('');
+                    }
+                }
+            } catch (err) {
+                console.error('Failed to fetch history:', err);
+            }
+        }
+
         fetchPipelines();
+        fetchHistory();
         setInterval(fetchPipelines, 3000);
+        setInterval(fetchHistory, 3000);
     </script>
 </body>
 </html>"""
