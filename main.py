@@ -320,7 +320,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <div class="space-y-6">
                     <div id="pipeline-grid">
                         <h3 class="text-lg font-medium text-gray-300 mb-3">Active Pipelines</h3>
-                        <p class="text-gray-400">Pipeline tiles will be rendered here.</p>
+                        <div id="pipelines-container" class="grid grid-cols-1 gap-3">
+                            <p id="no-pipelines-msg" class="text-gray-400">No pipelines configured yet.</p>
+                        </div>
                     </div>
                     <div id="history-timeline">
                         <h3 class="text-lg font-medium text-gray-300 mb-3">Execution History</h3>
@@ -427,6 +429,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     container.querySelector('[name="selector_key"]').value = '';
                     container.querySelector('[name="selector_css"]').value = '';
                     container.querySelector('[name="selector_attr"]').value = 'text';
+                    fetchPipelines();
                 } else {
                     const errorData = await response.json();
                     const errorMsg = errorData.detail || JSON.stringify(errorData);
@@ -438,6 +441,94 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 setLoading(false);
             }
         });
+
+        function truncateUrl(url, maxLength = 40) {
+            if (url.length <= maxLength) return url;
+            return url.substring(0, maxLength - 3) + '...';
+        }
+
+        function getStatusBadge(status) {
+            if (!status) {
+                return '<span class="px-2 py-0.5 text-xs rounded bg-gray-600 text-gray-300">No runs</span>';
+            }
+            switch (status) {
+                case 'RUNNING':
+                    return '<span class="px-2 py-0.5 text-xs rounded bg-yellow-500/20 text-yellow-300 border border-yellow-500 animate-pulse">RUNNING</span>';
+                case 'COMPLETED':
+                    return '<span class="px-2 py-0.5 text-xs rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500">COMPLETED</span>';
+                case 'FAILED':
+                    return '<span class="px-2 py-0.5 text-xs rounded bg-rose-500/20 text-rose-400 border border-rose-500 font-medium">FAILED</span>';
+                case 'PENDING':
+                    return '<span class="px-2 py-0.5 text-xs rounded bg-blue-500/20 text-blue-300 border border-blue-500">PENDING</span>';
+                default:
+                    return `<span class="px-2 py-0.5 text-xs rounded bg-gray-600 text-gray-300">${status}</span>`;
+            }
+        }
+
+        function renderPipelineTile(pipeline) {
+            const selectorCount = pipeline.selectors ? pipeline.selectors.length : 0;
+            return `
+                <div class="bg-gray-700 border border-gray-600 rounded-lg p-4 hover:border-gray-500 transition duration-200">
+                    <div class="flex justify-between items-start mb-2">
+                        <h4 class="font-medium text-white truncate flex-1 mr-2">${pipeline.name}</h4>
+                        ${getStatusBadge(pipeline.latest_status)}
+                    </div>
+                    <p class="text-sm text-gray-400 mb-2 truncate" title="${pipeline.target_url}">${truncateUrl(pipeline.target_url)}</p>
+                    <div class="flex justify-between items-center">
+                        <span class="text-xs text-gray-500">${selectorCount} selector${selectorCount !== 1 ? 's' : ''}</span>
+                        <button onclick="triggerPipeline(${pipeline.id})"
+                            class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded text-sm text-white font-medium transition duration-200 flex items-center gap-1">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            Run
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function fetchPipelines() {
+            try {
+                const response = await fetch('/api/pipelines');
+                if (response.ok) {
+                    const pipelines = await response.json();
+                    const container = document.getElementById('pipelines-container');
+                    const noMsg = document.getElementById('no-pipelines-msg');
+
+                    if (pipelines.length === 0) {
+                        noMsg.classList.remove('hidden');
+                        container.innerHTML = '';
+                        container.appendChild(noMsg);
+                    } else {
+                        noMsg.classList.add('hidden');
+                        container.innerHTML = pipelines.map(renderPipelineTile).join('');
+                    }
+                }
+            } catch (err) {
+                console.error('Failed to fetch pipelines:', err);
+            }
+        }
+
+        async function triggerPipeline(pipelineId) {
+            try {
+                const response = await fetch(`/api/pipelines/${pipelineId}/trigger`, {
+                    method: 'POST'
+                });
+                if (response.ok) {
+                    fetchPipelines();
+                } else {
+                    const errorData = await response.json();
+                    alert(`Failed to trigger pipeline: ${errorData.detail || 'Unknown error'}`);
+                }
+            } catch (err) {
+                alert(`Network error: ${err.message}`);
+            }
+        }
+
+        fetchPipelines();
+        setInterval(fetchPipelines, 3000);
     </script>
 </body>
 </html>"""
