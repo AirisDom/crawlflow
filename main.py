@@ -449,19 +449,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         function getStatusBadge(status) {
             if (!status) {
-                return '<span class="px-2 py-0.5 text-xs rounded bg-gray-600 text-gray-300">No runs</span>';
+                return '';
             }
             switch (status) {
                 case 'RUNNING':
-                    return '<span class="px-2 py-0.5 text-xs rounded bg-yellow-500/20 text-yellow-300 border border-yellow-500 animate-pulse">RUNNING</span>';
+                    return '<span class="px-2 py-0.5 text-xs font-medium rounded bg-yellow-500/20 text-yellow-300 border border-yellow-500 animate-pulse">RUNNING</span>';
                 case 'COMPLETED':
-                    return '<span class="px-2 py-0.5 text-xs rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500">COMPLETED</span>';
+                    return '<span class="px-2 py-0.5 text-xs font-medium rounded bg-emerald-500/10 text-emerald-400 border-2 border-emerald-500">COMPLETED</span>';
                 case 'FAILED':
-                    return '<span class="px-2 py-0.5 text-xs rounded bg-rose-500/20 text-rose-400 border border-rose-500 font-medium">FAILED</span>';
+                    return '<span class="px-2 py-0.5 text-xs font-bold rounded bg-rose-600 text-white">FAILED</span>';
                 case 'PENDING':
-                    return '<span class="px-2 py-0.5 text-xs rounded bg-blue-500/20 text-blue-300 border border-blue-500">PENDING</span>';
+                    return '<span class="px-2 py-0.5 text-xs font-medium rounded bg-gray-600 text-gray-300 border border-gray-500">PENDING</span>';
                 default:
-                    return `<span class="px-2 py-0.5 text-xs rounded bg-gray-600 text-gray-300">${status}</span>`;
+                    return `<span class="px-2 py-0.5 text-xs font-medium rounded bg-gray-600 text-gray-300">${status}</span>`;
             }
         }
 
