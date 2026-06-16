@@ -420,3 +420,71 @@ async def test_api_valid_pipeline_creation():
             assert len(data["selectors"]) == 2
     finally:
         await teardown_test_db()
+
+
+@pytest.mark.asyncio
+async def test_api_delete_pipeline_success():
+    await setup_test_db()
+    try:
+        async with await get_test_client() as client:
+            create_response = await client.post("/api/pipelines", json={
+                "name": "ToDelete",
+                "target_url": "https://example.com",
+                "selectors": [{"key": "title", "selector": "h1", "attribute": "text"}]
+            })
+            assert create_response.status_code == 201
+            pipeline_id = create_response.json()["id"]
+
+            delete_response = await client.delete(f"/api/pipelines/{pipeline_id}")
+            assert delete_response.status_code == 204
+
+            list_response = await client.get("/api/pipelines")
+            assert list_response.status_code == 200
+            pipelines = list_response.json()
+            pipeline_ids = [p["id"] for p in pipelines]
+            assert pipeline_id not in pipeline_ids
+    finally:
+        await teardown_test_db()
+
+
+@pytest.mark.asyncio
+async def test_api_delete_pipeline_not_found():
+    await setup_test_db()
+    try:
+        async with await get_test_client() as client:
+            response = await client.delete("/api/pipelines/99999")
+            assert response.status_code == 404
+            data = response.json()
+            assert "detail" in data
+            assert "99999" in data["detail"]
+    finally:
+        await teardown_test_db()
+
+
+@pytest.mark.asyncio
+async def test_api_delete_pipeline_cascades_job_runs():
+    await setup_test_db()
+    try:
+        async with await get_test_client() as client:
+            create_response = await client.post("/api/pipelines", json={
+                "name": "ToDeleteWithJobs",
+                "target_url": "https://httpbin.org/html",
+                "selectors": [{"key": "title", "selector": "h1", "attribute": "text"}]
+            })
+            assert create_response.status_code == 201
+            pipeline_id = create_response.json()["id"]
+
+            trigger_response = await client.post(f"/api/pipelines/{pipeline_id}/trigger")
+            assert trigger_response.status_code == 202
+            job_id = trigger_response.json()["job_id"]
+
+            delete_response = await client.delete(f"/api/pipelines/{pipeline_id}")
+            assert delete_response.status_code == 204
+
+            history_response = await client.get("/api/history")
+            assert history_response.status_code == 200
+            history = history_response.json()
+            job_ids = [h["id"] for h in history]
+            assert job_id not in job_ids
+    finally:
+        await teardown_test_db()
