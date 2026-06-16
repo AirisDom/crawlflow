@@ -301,51 +301,95 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <meta name="description" content="CrawlFlow - Web Scraping Pipeline Orchestrator">
     <title>CrawlFlow Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(100%); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes slideOut {
+            from { opacity: 1; transform: translateX(0); }
+            to { opacity: 0; transform: translateX(100%); }
+        }
+        .fade-in { animation: fadeIn 0.3s ease-out forwards; }
+        .slide-in { animation: slideIn 0.3s ease-out forwards; }
+        .slide-out { animation: slideOut 0.3s ease-in forwards; }
+        .toast-container {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            max-width: calc(100vw - 2rem);
+        }
+        @media (max-width: 640px) {
+            .toast-container {
+                left: 1rem;
+                right: 1rem;
+            }
+        }
+        .spinner {
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+    </style>
 </head>
 <body class="bg-gray-900 text-gray-100 min-h-screen">
-    <div class="container mx-auto px-4 py-8">
-        <header class="mb-8">
-            <h1 class="text-3xl font-bold text-white">CrawlFlow</h1>
-            <p class="text-gray-400 mt-1">Web Scraping Pipeline Orchestrator</p>
+    <div id="toast-container" class="toast-container"></div>
+
+    <div class="container mx-auto px-3 sm:px-4 py-4 sm:py-8">
+        <header class="mb-6 sm:mb-8">
+            <h1 class="text-2xl sm:text-3xl font-bold text-white">CrawlFlow</h1>
+            <p class="text-gray-400 mt-1 text-sm sm:text-base">Web Scraping Pipeline Orchestrator</p>
         </header>
 
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <section id="control-desk" class="bg-gray-800 rounded-lg p-6 shadow-lg">
-                <h2 class="text-xl font-semibold text-white mb-4 border-b border-gray-700 pb-2">Control Desk</h2>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-8">
+            <section id="control-desk" class="bg-gray-800 rounded-lg p-4 sm:p-6 shadow-lg">
+                <h2 class="text-lg sm:text-xl font-semibold text-white mb-4 border-b border-gray-700 pb-2">Control Desk</h2>
                 <form id="pipeline-form" class="space-y-4">
                     <div>
                         <label for="pipeline-name" class="block text-sm font-medium text-gray-300 mb-1">Pipeline Name</label>
                         <input type="text" id="pipeline-name" name="name" required
-                            class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200"
+                            class="w-full px-3 sm:px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200 text-sm sm:text-base"
                             placeholder="Enter pipeline name">
                     </div>
                     <div>
                         <label for="target-url" class="block text-sm font-medium text-gray-300 mb-1">Target URL</label>
                         <input type="url" id="target-url" name="target_url" required
-                            class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200"
+                            class="w-full px-3 sm:px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200 text-sm sm:text-base"
                             placeholder="https://example.com">
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-300 mb-2">Selectors</label>
                         <div id="selectors-container" class="space-y-2">
-                            <div class="selector-row flex gap-2 items-center">
+                            <div class="selector-row flex flex-col sm:flex-row gap-2 sm:items-center">
                                 <input type="text" name="selector_key" required
                                     class="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
                                     placeholder="Key name">
                                 <input type="text" name="selector_css" required
                                     class="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
                                     placeholder="CSS selector">
-                                <select name="selector_attr"
-                                    class="px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm">
-                                    <option value="text">Text</option>
-                                    <option value="href">href</option>
-                                    <option value="src">src</option>
-                                </select>
-                                <button type="button" onclick="removeSelector(this)" class="px-2 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-white transition duration-200">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                                    </svg>
-                                </button>
+                                <div class="flex gap-2">
+                                    <select name="selector_attr"
+                                        class="flex-1 sm:flex-none px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm">
+                                        <option value="text">Text</option>
+                                        <option value="href">href</option>
+                                        <option value="src">src</option>
+                                    </select>
+                                    <button type="button" onclick="removeSelector(this)" class="px-2 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white transition duration-200">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                    </button>
+                                </div>
                             </div>
                         </div>
                         <button type="button" onclick="addSelector()"
@@ -356,11 +400,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                             Add Selector
                         </button>
                     </div>
-                    <div id="form-feedback" class="hidden rounded-lg p-3 text-sm"></div>
                     <button type="submit" id="submit-btn"
                         class="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 disabled:cursor-not-allowed rounded-lg text-white font-medium transition duration-200 flex items-center justify-center gap-2">
-                        <span>Create Pipeline</span>
-                        <svg id="submit-spinner" class="hidden animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <span id="submit-text">Create Pipeline</span>
+                        <svg id="submit-spinner" class="hidden spinner h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                         </svg>
@@ -368,25 +411,25 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </form>
             </section>
 
-            <section id="orchestration-matrix" class="bg-gray-800 rounded-lg p-6 shadow-lg">
-                <h2 class="text-xl font-semibold text-white mb-4 border-b border-gray-700 pb-2">Orchestration Matrix</h2>
+            <section id="orchestration-matrix" class="bg-gray-800 rounded-lg p-4 sm:p-6 shadow-lg">
+                <h2 class="text-lg sm:text-xl font-semibold text-white mb-4 border-b border-gray-700 pb-2">Orchestration Matrix</h2>
                 <div class="space-y-6">
                     <div id="pipeline-grid">
-                        <h3 class="text-lg font-medium text-gray-300 mb-3">Active Pipelines</h3>
+                        <h3 class="text-base sm:text-lg font-medium text-gray-300 mb-3">Active Pipelines</h3>
                         <div id="pipelines-container" class="grid grid-cols-1 gap-3">
-                            <p id="no-pipelines-msg" class="text-gray-400">No pipelines configured yet.</p>
+                            <p id="no-pipelines-msg" class="text-gray-400 text-sm sm:text-base">No pipelines configured yet.</p>
                         </div>
                     </div>
                     <div id="history-timeline">
-                        <h3 class="text-lg font-medium text-gray-300 mb-3">Execution History</h3>
-                        <div id="history-container" class="overflow-x-auto">
-                            <table class="w-full text-sm text-left">
+                        <h3 class="text-base sm:text-lg font-medium text-gray-300 mb-3">Execution History</h3>
+                        <div id="history-container" class="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0">
+                            <table class="w-full text-sm text-left min-w-[400px]">
                                 <thead class="text-xs text-gray-400 uppercase bg-gray-700/50">
                                     <tr>
-                                        <th class="px-3 py-2 rounded-tl-lg">Pipeline</th>
-                                        <th class="px-3 py-2">Status</th>
-                                        <th class="px-3 py-2">Started</th>
-                                        <th class="px-3 py-2 rounded-tr-lg">Completed</th>
+                                        <th class="px-2 sm:px-3 py-2 rounded-tl-lg">Pipeline</th>
+                                        <th class="px-2 sm:px-3 py-2">Status</th>
+                                        <th class="px-2 sm:px-3 py-2 hidden sm:table-cell">Started</th>
+                                        <th class="px-2 sm:px-3 py-2 rounded-tr-lg">Completed</th>
                                     </tr>
                                 </thead>
                                 <tbody id="history-tbody" class="divide-y divide-gray-700">
@@ -401,10 +444,70 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     </div>
 
     <script>
+        const pendingOperations = new Set();
+
+        function showToast(message, type = 'info', duration = 5000) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            const id = 'toast-' + Date.now();
+            toast.id = id;
+
+            let bgColor, borderColor, iconSvg;
+            switch (type) {
+                case 'success':
+                    bgColor = 'bg-emerald-900/95';
+                    borderColor = 'border-emerald-500';
+                    iconSvg = '<svg class="h-5 w-5 text-emerald-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>';
+                    break;
+                case 'error':
+                    bgColor = 'bg-rose-900/95';
+                    borderColor = 'border-rose-500';
+                    iconSvg = '<svg class="h-5 w-5 text-rose-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>';
+                    break;
+                case 'warning':
+                    bgColor = 'bg-yellow-900/95';
+                    borderColor = 'border-yellow-500';
+                    iconSvg = '<svg class="h-5 w-5 text-yellow-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>';
+                    break;
+                default:
+                    bgColor = 'bg-blue-900/95';
+                    borderColor = 'border-blue-500';
+                    iconSvg = '<svg class="h-5 w-5 text-blue-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>';
+            }
+
+            toast.className = `${bgColor} ${borderColor} border rounded-lg p-3 sm:p-4 shadow-lg backdrop-blur-sm slide-in flex items-start gap-3 max-w-sm sm:max-w-md`;
+            toast.innerHTML = `
+                ${iconSvg}
+                <p class="text-sm text-white flex-1 break-words">${message}</p>
+                <button onclick="dismissToast('${id}')" class="text-gray-400 hover:text-white transition flex-shrink-0">
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            `;
+
+            container.appendChild(toast);
+
+            if (duration > 0) {
+                setTimeout(() => dismissToast(id), duration);
+            }
+
+            return id;
+        }
+
+        function dismissToast(id) {
+            const toast = document.getElementById(id);
+            if (toast) {
+                toast.classList.remove('slide-in');
+                toast.classList.add('slide-out');
+                setTimeout(() => toast.remove(), 300);
+            }
+        }
+
         function addSelector() {
             const container = document.getElementById('selectors-container');
             const row = document.createElement('div');
-            row.className = 'selector-row flex gap-2 items-center';
+            row.className = 'selector-row flex flex-col sm:flex-row gap-2 sm:items-center fade-in';
             row.innerHTML = `
                 <input type="text" name="selector_key" required
                     class="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
@@ -412,17 +515,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <input type="text" name="selector_css" required
                     class="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
                     placeholder="CSS selector">
-                <select name="selector_attr"
-                    class="px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm">
-                    <option value="text">Text</option>
-                    <option value="href">href</option>
-                    <option value="src">src</option>
-                </select>
-                <button type="button" onclick="removeSelector(this)" class="px-2 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-white transition duration-200">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                </button>
+                <div class="flex gap-2">
+                    <select name="selector_attr"
+                        class="flex-1 sm:flex-none px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm">
+                        <option value="text">Text</option>
+                        <option value="href">href</option>
+                        <option value="src">src</option>
+                    </select>
+                    <button type="button" onclick="removeSelector(this)" class="px-2 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white transition duration-200">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
             `;
             container.appendChild(row);
         }
@@ -434,29 +539,18 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
         }
 
-        function showFeedback(message, isError) {
-            const feedback = document.getElementById('form-feedback');
-            feedback.textContent = message;
-            feedback.className = isError
-                ? 'rounded-lg p-3 text-sm bg-red-900/50 border border-red-600 text-red-200'
-                : 'rounded-lg p-3 text-sm bg-emerald-900/50 border border-emerald-600 text-emerald-200';
-            feedback.classList.remove('hidden');
-            if (!isError) {
-                setTimeout(() => feedback.classList.add('hidden'), 5000);
-            }
-        }
-
-        function setLoading(loading) {
+        function setFormLoading(loading) {
             const btn = document.getElementById('submit-btn');
             const spinner = document.getElementById('submit-spinner');
+            const text = document.getElementById('submit-text');
             btn.disabled = loading;
             spinner.classList.toggle('hidden', !loading);
+            text.textContent = loading ? 'Creating...' : 'Create Pipeline';
         }
 
         document.getElementById('pipeline-form').addEventListener('submit', async function(e) {
             e.preventDefault();
-            setLoading(true);
-            document.getElementById('form-feedback').classList.add('hidden');
+            setFormLoading(true);
 
             const name = document.getElementById('pipeline-name').value.trim();
             const targetUrl = document.getElementById('target-url').value.trim();
@@ -473,8 +567,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
 
             if (selectors.length === 0) {
-                showFeedback('At least one selector is required', true);
-                setLoading(false);
+                showToast('At least one selector is required', 'error');
+                setFormLoading(false);
                 return;
             }
 
@@ -487,7 +581,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
                 if (response.ok) {
                     const data = await response.json();
-                    showFeedback(`Pipeline "${data.name}" created successfully (ID: ${data.id})`, false);
+                    showToast(`Pipeline "${data.name}" created successfully`, 'success');
                     document.getElementById('pipeline-form').reset();
                     const container = document.getElementById('selectors-container');
                     while (container.children.length > 1) {
@@ -500,12 +594,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 } else {
                     const errorData = await response.json();
                     const errorMsg = errorData.detail || JSON.stringify(errorData);
-                    showFeedback(`Error: ${errorMsg}`, true);
+                    showToast(`Error: ${errorMsg}`, 'error', 8000);
                 }
             } catch (err) {
-                showFeedback(`Network error: ${err.message}`, true);
+                showToast(`Network error: ${err.message}`, 'error', 8000);
             } finally {
-                setLoading(false);
+                setFormLoading(false);
             }
         });
 
@@ -532,38 +626,43 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
         }
 
-        function renderPipelineTile(pipeline) {
+        function getSpinnerSvg() {
+            return '<svg class="spinner h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>';
+        }
+
+        function renderPipelineTile(pipeline, isNew = false) {
             const selectorCount = pipeline.selectors ? pipeline.selectors.length : 0;
             const escapedName = pipeline.name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            const isTriggerPending = pendingOperations.has(`trigger-${pipeline.id}`);
+            const isDeletePending = pendingOperations.has(`delete-${pipeline.id}`);
+            const fadeClass = isNew ? 'fade-in' : '';
+
             return `
-                <div class="bg-gray-700 border border-gray-600 rounded-lg p-4 hover:border-gray-500 transition duration-200">
-                    <div class="flex justify-between items-start mb-2">
-                        <h4 class="font-medium text-white truncate flex-1 mr-2">${pipeline.name}</h4>
+                <div class="pipeline-tile bg-gray-700 border border-gray-600 rounded-lg p-3 sm:p-4 hover:border-gray-500 transition duration-200 ${fadeClass}" data-pipeline-id="${pipeline.id}">
+                    <div class="flex justify-between items-start mb-2 gap-2">
+                        <h4 class="font-medium text-white truncate flex-1 text-sm sm:text-base">${pipeline.name}</h4>
                         ${getStatusBadge(pipeline.latest_status)}
                     </div>
-                    <p class="text-sm text-gray-400 mb-2 truncate" title="${pipeline.target_url}">${truncateUrl(pipeline.target_url)}</p>
-                    <div class="flex justify-between items-center">
+                    <p class="text-xs sm:text-sm text-gray-400 mb-2 truncate" title="${pipeline.target_url}">${truncateUrl(pipeline.target_url, 35)}</p>
+                    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                         <span class="text-xs text-gray-500">${selectorCount} selector${selectorCount !== 1 ? 's' : ''}</span>
-                        <div class="flex gap-2">
-                            <button onclick="deletePipeline(${pipeline.id}, '${escapedName}')"
-                                class="px-2 py-1.5 bg-red-600 hover:bg-red-700 rounded text-sm text-white font-medium transition duration-200 flex items-center gap-1" title="Delete pipeline">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                </svg>
+                        <div class="flex gap-2 w-full sm:w-auto">
+                            <button id="delete-btn-${pipeline.id}" onclick="deletePipeline(${pipeline.id}, '${escapedName}')" ${isDeletePending ? 'disabled' : ''}
+                                class="flex-1 sm:flex-none px-2 py-1.5 bg-red-600 hover:bg-red-700 disabled:bg-red-800 disabled:cursor-not-allowed rounded text-sm text-white font-medium transition duration-200 flex items-center justify-center gap-1" title="Delete pipeline">
+                                ${isDeletePending ? getSpinnerSvg() : '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>'}
                             </button>
-                            <button onclick="triggerPipeline(${pipeline.id})"
-                                class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded text-sm text-white font-medium transition duration-200 flex items-center gap-1">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
-                                Run
+                            <button id="trigger-btn-${pipeline.id}" onclick="triggerPipeline(${pipeline.id})" ${isTriggerPending ? 'disabled' : ''}
+                                class="flex-1 sm:flex-none px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 disabled:cursor-not-allowed rounded text-sm text-white font-medium transition duration-200 flex items-center justify-center gap-1">
+                                ${isTriggerPending ? getSpinnerSvg() : '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>'}
+                                <span class="hidden sm:inline">${isTriggerPending ? 'Running...' : 'Run'}</span>
                             </button>
                         </div>
                     </div>
                 </div>
             `;
         }
+
+        let previousPipelineIds = new Set();
 
         async function fetchPipelines() {
             try {
@@ -572,6 +671,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     const pipelines = await response.json();
                     const container = document.getElementById('pipelines-container');
                     const noMsg = document.getElementById('no-pipelines-msg');
+                    const currentIds = new Set(pipelines.map(p => p.id));
 
                     if (pipelines.length === 0) {
                         noMsg.classList.remove('hidden');
@@ -579,8 +679,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         container.appendChild(noMsg);
                     } else {
                         noMsg.classList.add('hidden');
-                        container.innerHTML = pipelines.map(renderPipelineTile).join('');
+                        container.innerHTML = pipelines.map(p => {
+                            const isNew = !previousPipelineIds.has(p.id) && previousPipelineIds.size > 0;
+                            return renderPipelineTile(p, isNew);
+                        }).join('');
                     }
+
+                    previousPipelineIds = currentIds;
+
                     if (typeof pollingState !== 'undefined') {
                         pollingState.pipelinesErrors = 0;
                     }
@@ -598,18 +704,49 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         }
 
         async function triggerPipeline(pipelineId) {
+            const opKey = `trigger-${pipelineId}`;
+            if (pendingOperations.has(opKey)) return;
+
+            pendingOperations.add(opKey);
+            updateTriggerButton(pipelineId, true);
+
             try {
                 const response = await fetch(`/api/pipelines/${pipelineId}/trigger`, {
                     method: 'POST'
                 });
                 if (response.ok) {
+                    showToast('Pipeline triggered successfully', 'success');
                     fetchPipelines();
+                    fetchHistory();
                 } else {
                     const errorData = await response.json();
-                    alert(`Failed to trigger pipeline: ${errorData.detail || 'Unknown error'}`);
+                    showToast(`Failed to trigger pipeline: ${errorData.detail || 'Unknown error'}`, 'error');
                 }
             } catch (err) {
-                alert(`Network error: ${err.message}`);
+                showToast(`Network error: ${err.message}`, 'error');
+            } finally {
+                pendingOperations.delete(opKey);
+                updateTriggerButton(pipelineId, false);
+            }
+        }
+
+        function updateTriggerButton(pipelineId, isLoading) {
+            const btn = document.getElementById(`trigger-btn-${pipelineId}`);
+            if (btn) {
+                btn.disabled = isLoading;
+                btn.innerHTML = isLoading
+                    ? `${getSpinnerSvg()}<span class="hidden sm:inline">Running...</span>`
+                    : '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg><span class="hidden sm:inline">Run</span>';
+            }
+        }
+
+        function updateDeleteButton(pipelineId, isLoading) {
+            const btn = document.getElementById(`delete-btn-${pipelineId}`);
+            if (btn) {
+                btn.disabled = isLoading;
+                btn.innerHTML = isLoading
+                    ? getSpinnerSvg()
+                    : '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>';
             }
         }
 
@@ -617,19 +754,30 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             if (!confirm(`Are you sure you want to delete pipeline "${pipelineName}"? This will also delete all associated job runs.`)) {
                 return;
             }
+
+            const opKey = `delete-${pipelineId}`;
+            if (pendingOperations.has(opKey)) return;
+
+            pendingOperations.add(opKey);
+            updateDeleteButton(pipelineId, true);
+
             try {
                 const response = await fetch(`/api/pipelines/${pipelineId}`, {
                     method: 'DELETE'
                 });
                 if (response.ok || response.status === 204) {
+                    showToast(`Pipeline "${pipelineName}" deleted`, 'success');
                     fetchPipelines();
                     fetchHistory();
                 } else {
                     const errorData = await response.json();
-                    alert(`Failed to delete pipeline: ${errorData.detail || 'Unknown error'}`);
+                    showToast(`Failed to delete pipeline: ${errorData.detail || 'Unknown error'}`, 'error');
                 }
             } catch (err) {
-                alert(`Network error: ${err.message}`);
+                showToast(`Network error: ${err.message}`, 'error');
+            } finally {
+                pendingOperations.delete(opKey);
+                updateDeleteButton(pipelineId, false);
             }
         }
 
@@ -639,6 +787,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             return date.toLocaleString('en-US', {
                 month: 'short', day: 'numeric',
                 hour: '2-digit', minute: '2-digit', second: '2-digit'
+            });
+        }
+
+        function formatDateTimeShort(isoString) {
+            if (!isoString) return '-';
+            const date = new Date(isoString);
+            return date.toLocaleString('en-US', {
+                month: 'short', day: 'numeric',
+                hour: '2-digit', minute: '2-digit'
             });
         }
 
@@ -660,16 +817,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
         }
 
-        function renderHistoryRow(job) {
+        let previousJobIds = new Set();
+
+        function renderHistoryRow(job, isNew = false) {
             const hasData = job.status === 'COMPLETED' && job.extracted_data;
             const hasError = job.status === 'FAILED' && job.error_message;
             const isExpandable = hasData || hasError;
+            const fadeClass = isNew ? 'fade-in' : '';
 
             let expandButton = '';
             if (isExpandable) {
                 expandButton = `
                     <button id="toggle-btn-${job.id}" onclick="toggleJobData(${job.id})"
-                        class="ml-2 p-1 text-gray-400 hover:text-white transition duration-200" title="View details">
+                        class="ml-1 sm:ml-2 p-1 text-gray-400 hover:text-white transition duration-200" title="View details">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
                         </svg>
@@ -688,8 +848,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 const bgColor = hasError ? 'bg-rose-900/20 border-rose-800' : 'bg-gray-900/50 border-gray-700';
                 expandableRow = `
                     <tr id="job-data-${job.id}" class="hidden">
-                        <td colspan="4" class="px-3 py-2">
-                            <div class="${bgColor} border rounded-lg p-3 max-h-64 overflow-auto">
+                        <td colspan="4" class="px-2 sm:px-3 py-2">
+                            <div class="${bgColor} border rounded-lg p-2 sm:p-3 max-h-64 overflow-auto">
                                 <pre class="text-xs text-gray-300 whitespace-pre-wrap break-words font-mono">${dataContent}</pre>
                             </div>
                         </td>
@@ -697,16 +857,16 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
 
             return `
-                <tr class="hover:bg-gray-700/30 transition duration-150">
-                    <td class="px-3 py-3">
+                <tr class="hover:bg-gray-700/30 transition duration-150 ${fadeClass}" data-job-id="${job.id}">
+                    <td class="px-2 sm:px-3 py-2 sm:py-3">
                         <div class="flex items-center">
-                            <span class="text-white font-medium truncate max-w-[120px]" title="${job.pipeline_name}">${job.pipeline_name}</span>
+                            <span class="text-white font-medium truncate max-w-[80px] sm:max-w-[120px] text-xs sm:text-sm" title="${job.pipeline_name}">${job.pipeline_name}</span>
                             ${expandButton}
                         </div>
                     </td>
-                    <td class="px-3 py-3">${getStatusBadge(job.status)}</td>
-                    <td class="px-3 py-3 text-gray-400 text-xs">${formatDateTime(job.started_at)}</td>
-                    <td class="px-3 py-3 text-gray-400 text-xs">${formatDateTime(job.completed_at)}</td>
+                    <td class="px-2 sm:px-3 py-2 sm:py-3">${getStatusBadge(job.status)}</td>
+                    <td class="px-2 sm:px-3 py-2 sm:py-3 text-gray-400 text-xs hidden sm:table-cell">${formatDateTime(job.started_at)}</td>
+                    <td class="px-2 sm:px-3 py-2 sm:py-3 text-gray-400 text-xs">${formatDateTimeShort(job.completed_at)}</td>
                 </tr>
                 ${expandableRow}
             `;
@@ -718,12 +878,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 if (response.ok) {
                     const history = await response.json();
                     const tbody = document.getElementById('history-tbody');
+                    const currentIds = new Set(history.map(j => j.id));
 
                     if (history.length === 0) {
-                        tbody.innerHTML = '<tr><td colspan="4" class="px-3 py-4 text-gray-400 text-center">No job runs yet.</td></tr>';
+                        tbody.innerHTML = '<tr><td colspan="4" class="px-3 py-4 text-gray-400 text-center text-sm">No job runs yet.</td></tr>';
                     } else {
-                        tbody.innerHTML = history.map(renderHistoryRow).join('');
+                        tbody.innerHTML = history.map(j => {
+                            const isNew = !previousJobIds.has(j.id) && previousJobIds.size > 0;
+                            return renderHistoryRow(j, isNew);
+                        }).join('');
                     }
+
+                    previousJobIds = currentIds;
+
                     if (typeof pollingState !== 'undefined') {
                         pollingState.historyErrors = 0;
                     }
