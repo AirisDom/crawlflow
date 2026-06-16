@@ -753,7 +753,95 @@ class ScrapingError(Exception):
     pass
 
 
-async def scrape_url(url: str, selectors: list[SelectorConfig]) -> dict[str, list[str]]:
+class SelectorError(Exception):
+    def __init__(self, selector_key: str, selector_css: str, message: str):
+        self.selector_key = selector_key
+        self.selector_css = selector_css
+        self.message = message
+        super().__init__(f"Selector '{selector_key}' ({selector_css}): {message}")
+
+
+class ScrapeResult:
+    def __init__(self):
+        self.data: dict[str, list[str]] = {}
+        self.errors: list[str] = []
+        self.warnings: list[str] = []
+
+    def add_data(self, key: str, values: list[str]) -> None:
+        self.data[key] = values
+
+    def add_error(self, error: str) -> None:
+        self.errors.append(error)
+
+    def add_warning(self, warning: str) -> None:
+        self.warnings.append(warning)
+
+    def has_errors(self) -> bool:
+        return len(self.errors) > 0
+
+    def has_warnings(self) -> bool:
+        return len(self.warnings) > 0
+
+    def has_any_data(self) -> bool:
+        return any(len(v) > 0 for v in self.data.values())
+
+    def to_dict(self) -> dict:
+        result: dict = {"data": self.data}
+        if self.errors:
+            result["_errors"] = self.errors
+        if self.warnings:
+            result["_warnings"] = self.warnings
+        return result
+
+
+def extract_with_selector(
+    soup: BeautifulSoup, selector_config: SelectorConfig, result: ScrapeResult
+) -> None:
+    try:
+        elements = soup.select(selector_config.selector)
+    except Exception as e:
+        error_msg = (
+            f"Invalid CSS selector '{selector_config.selector}' for key '{selector_config.key}': "
+            f"{type(e).__name__}: {e}"
+        )
+        result.add_error(error_msg)
+        result.add_data(selector_config.key, [])
+        return
+
+    if not elements:
+        warning_msg = (
+            f"Selector '{selector_config.selector}' for key '{selector_config.key}' "
+            f"found no matching elements"
+        )
+        result.add_warning(warning_msg)
+        result.add_data(selector_config.key, [])
+        return
+
+    values: list[str] = []
+    for idx, element in enumerate(elements):
+        try:
+            if selector_config.attribute == "text":
+                text_content = element.get_text(strip=True)
+                values.append(text_content)
+            elif selector_config.attribute == "href":
+                href = element.get("href")
+                if href:
+                    values.append(str(href))
+            elif selector_config.attribute == "src":
+                src = element.get("src")
+                if src:
+                    values.append(str(src))
+        except Exception as e:
+            error_msg = (
+                f"Error extracting '{selector_config.attribute}' from element {idx} "
+                f"for key '{selector_config.key}': {type(e).__name__}: {e}"
+            )
+            result.add_error(error_msg)
+
+    result.add_data(selector_config.key, values)
+
+
+async def scrape_url(url: str, selectors: list[SelectorConfig]) -> dict:
     timeout = httpx.Timeout(
         connect=HTTPX_CONNECT_TIMEOUT,
         read=HTTPX_READ_TIMEOUT,
@@ -789,26 +877,35 @@ async def scrape_url(url: str, selectors: list[SelectorConfig]) -> dict[str, lis
             f"while fetching '{url}'. Expected a successful response (2xx status code)."
         )
 
-    soup = BeautifulSoup(response.text, "html.parser")
-    extracted_data: dict[str, list[str]] = {}
+    html_content = response.text
+    if not html_content or not html_content.strip():
+        raise ScrapingError(f"Empty response body received from '{url}'")
+
+    try:
+        soup = BeautifulSoup(html_content, "html.parser")
+    except Exception as e:
+        raise ScrapingError(
+            f"Failed to parse HTML from '{url}': {type(e).__name__}: {e}. "
+            f"The response may contain malformed HTML that cannot be processed."
+        ) from e
+
+    if soup.find() is None:
+        raise ScrapingError(
+            f"No valid HTML structure found in response from '{url}'. "
+            f"The content may be empty, malformed, or not HTML."
+        )
+
+    result = ScrapeResult()
 
     for selector_config in selectors:
-        elements = soup.select(selector_config.selector)
-        values: list[str] = []
-        for element in elements:
-            if selector_config.attribute == "text":
-                values.append(element.get_text(strip=True))
-            elif selector_config.attribute == "href":
-                href = element.get("href")
-                if href:
-                    values.append(str(href))
-            elif selector_config.attribute == "src":
-                src = element.get("src")
-                if src:
-                    values.append(str(src))
-        extracted_data[selector_config.key] = values
+        extract_with_selector(soup, selector_config, result)
 
-    return extracted_data
+    if result.has_errors() and not result.has_any_data():
+        raise ScrapingError(
+            f"All selectors failed with errors:\n" + "\n".join(result.errors)
+        )
+
+    return result.to_dict()
 
 
 async def run_pipeline_job(pipeline_id: int, job_run_id: int) -> None:
