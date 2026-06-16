@@ -9,7 +9,8 @@ import httpx
 from bs4 import BeautifulSoup
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, HttpUrl, field_validator
+from pydantic import BaseModel, HttpUrl, field_validator, model_validator
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy import ForeignKey, Text, event, select, func
 from sqlalchemy.ext.asyncio import AsyncAttrs, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -48,7 +49,7 @@ class Pipeline(Base):
     __tablename__ = "pipelines"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     target_url: Mapped[str] = mapped_column(Text, nullable=False)
     selectors_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
@@ -70,10 +71,34 @@ class JobRun(Base):
     pipeline: Mapped["Pipeline"] = relationship(back_populates="job_runs")
 
 
+VALID_ATTRIBUTES = ("text", "href", "src")
+
+
 class SelectorConfig(BaseModel):
     key: str
     selector: str
     attribute: Literal["text", "href", "src"]
+
+    @field_validator("key")
+    @classmethod
+    def key_not_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("selector key cannot be empty")
+        return v.strip()
+
+    @field_validator("selector")
+    @classmethod
+    def selector_not_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("CSS selector cannot be empty")
+        return v.strip()
+
+    @field_validator("attribute")
+    @classmethod
+    def attribute_valid(cls, v: str) -> str:
+        if v not in VALID_ATTRIBUTES:
+            raise ValueError(f"attribute must be one of: {', '.join(VALID_ATTRIBUTES)}")
+        return v
 
 
 class PipelineCreate(BaseModel):
@@ -84,9 +109,24 @@ class PipelineCreate(BaseModel):
     @field_validator("name")
     @classmethod
     def name_not_empty(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("name cannot be empty")
-        return v.strip()
+        if not v or not v.strip():
+            raise ValueError("pipeline name cannot be empty")
+        stripped = v.strip()
+        if len(stripped) > 255:
+            raise ValueError("pipeline name cannot exceed 255 characters")
+        return stripped
+
+    @field_validator("target_url", mode="before")
+    @classmethod
+    def validate_url_format(cls, v: str) -> str:
+        if isinstance(v, str):
+            stripped = v.strip()
+            if not stripped:
+                raise ValueError("target URL cannot be empty")
+            if not stripped.startswith(("http://", "https://")):
+                raise ValueError("target URL must start with http:// or https://")
+            return stripped
+        return v
 
     @field_validator("selectors")
     @classmethod
@@ -94,6 +134,19 @@ class PipelineCreate(BaseModel):
         if not v:
             raise ValueError("at least one selector is required")
         return v
+
+    @model_validator(mode="after")
+    def check_duplicate_selector_keys(self) -> "PipelineCreate":
+        keys = [s.key for s in self.selectors]
+        if len(keys) != len(set(keys)):
+            seen = set()
+            duplicates = []
+            for key in keys:
+                if key in seen and key not in duplicates:
+                    duplicates.append(key)
+                seen.add(key)
+            raise ValueError(f"duplicate selector keys found: {', '.join(duplicates)}")
+        return self
 
     def selectors_to_json(self) -> str:
         return json.dumps([s.model_dump() for s in self.selectors])
@@ -738,13 +791,27 @@ async def create_pipeline(
     payload: PipelineCreate,
     db: AsyncSession = Depends(get_db),
 ) -> PipelineResponse:
+    existing = await db.execute(select(Pipeline).where(Pipeline.name == payload.name))
+    if existing.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"A pipeline with name '{payload.name}' already exists"
+        )
+
     pipeline = Pipeline(
         name=payload.name,
         target_url=str(payload.target_url),
         selectors_json=payload.selectors_to_json(),
     )
     db.add(pipeline)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"A pipeline with name '{payload.name}' already exists"
+        )
     await db.refresh(pipeline)
     return PipelineResponse.from_orm_model(pipeline)
 
