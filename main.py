@@ -1,3 +1,34 @@
+"""
+CrawlFlow - Web Scraping Pipeline Orchestrator.
+
+A production-ready, single-file FastAPI application for managing and executing
+web scraping pipelines. CrawlFlow provides a complete solution for:
+
+- Defining reusable scraping pipelines with configurable CSS selectors
+- Executing pipelines as background jobs with full state tracking
+- Monitoring job progress through a real-time dashboard UI
+- Storing and retrieving extracted data with full error handling
+
+Technical Stack:
+    - Backend: FastAPI with async endpoints and BackgroundTasks
+    - Database: SQLAlchemy async with aiosqlite for SQLite persistence
+    - Scraping: httpx for async HTTP requests, BeautifulSoup for parsing
+    - Frontend: Embedded SPA with Tailwind CSS and vanilla JavaScript
+
+Usage:
+    Run with: uvicorn main:app --reload
+    Access dashboard at: http://localhost:8000/
+
+API Endpoints:
+    GET  /              - Dashboard UI
+    GET  /health        - Health check endpoint
+    POST /api/pipelines - Create a new pipeline
+    GET  /api/pipelines - List all pipelines with latest job status
+    POST /api/pipelines/{id}/trigger - Trigger pipeline execution
+    GET  /api/history   - Get recent job execution history
+    DELETE /api/pipelines/{id} - Delete a pipeline and its job runs
+"""
+
 import json
 import traceback
 from contextlib import asynccontextmanager
@@ -12,8 +43,18 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, HttpUrl, field_validator, model_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import ForeignKey, Text, delete, event, func, select
-from sqlalchemy.ext.asyncio import AsyncAttrs, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncAttrs,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+
+# =============================================================================
+# Configuration
+# =============================================================================
 
 DATABASE_URL = "sqlite+aiosqlite:///./crawlflow.db"
 
@@ -28,11 +69,17 @@ HTTPX_TIMEOUT = httpx.Timeout(
     pool=HTTPX_POOL_TIMEOUT,
 )
 
+
+# =============================================================================
+# Database Engine Setup
+# =============================================================================
+
 engine = create_async_engine(DATABASE_URL, echo=False)
 
 
 @event.listens_for(engine.sync_engine, "connect")
 def enable_sqlite_fk(dbapi_conn, connection_record):
+    """Enable SQLite foreign key constraint enforcement on each connection."""
     cursor = dbapi_conn.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
     cursor.close()
@@ -41,11 +88,33 @@ def enable_sqlite_fk(dbapi_conn, connection_record):
 async_session = async_sessionmaker(engine, expire_on_commit=False)
 
 
+# =============================================================================
+# SQLAlchemy Models
+# =============================================================================
+
 class Base(AsyncAttrs, DeclarativeBase):
+    """Base class for all SQLAlchemy ORM models with async support."""
+
     pass
 
 
 class Pipeline(Base):
+    """
+    Represents a configured web scraping pipeline.
+
+    A pipeline defines a target URL and a set of CSS selectors for extracting
+    data from the page. Pipelines can be triggered multiple times, creating
+    JobRun records for each execution.
+
+    Attributes:
+        id: Unique identifier for the pipeline.
+        name: Human-readable name for the pipeline (must be unique).
+        target_url: The URL to scrape when the pipeline is executed.
+        selectors_json: JSON-serialized list of selector configurations.
+        created_at: Timestamp when the pipeline was created.
+        job_runs: Relationship to all JobRun executions for this pipeline.
+    """
+
     __tablename__ = "pipelines"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -58,10 +127,29 @@ class Pipeline(Base):
 
 
 class JobRun(Base):
+    """
+    Represents a single execution of a pipeline.
+
+    JobRuns track the complete lifecycle of a scraping job, from PENDING through
+    RUNNING to either COMPLETED or FAILED terminal states.
+
+    Attributes:
+        id: Unique identifier for the job run.
+        pipeline_id: Foreign key to the parent Pipeline.
+        status: Current state (PENDING, RUNNING, COMPLETED, FAILED).
+        started_at: Timestamp when execution began.
+        completed_at: Timestamp when execution finished.
+        extracted_data: JSON-serialized scraped data (on success).
+        error_message: Error details (on failure).
+        pipeline: Relationship to the parent Pipeline.
+    """
+
     __tablename__ = "job_runs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    pipeline_id: Mapped[int] = mapped_column(ForeignKey("pipelines.id"), nullable=False)
+    pipeline_id: Mapped[int] = mapped_column(
+        ForeignKey("pipelines.id"), nullable=False
+    )
     status: Mapped[str] = mapped_column(Text, nullable=False, default="PENDING")
     started_at: Mapped[datetime | None] = mapped_column(default=None)
     completed_at: Mapped[datetime | None] = mapped_column(default=None)
@@ -71,10 +159,23 @@ class JobRun(Base):
     pipeline: Mapped["Pipeline"] = relationship(back_populates="job_runs")
 
 
+# =============================================================================
+# Pydantic Schemas
+# =============================================================================
+
 VALID_ATTRIBUTES = ("text", "href", "src")
 
 
 class SelectorConfig(BaseModel):
+    """
+    Configuration for a single CSS selector extraction rule.
+
+    Attributes:
+        key: The name/key to use for the extracted data.
+        selector: CSS selector string to match elements.
+        attribute: What to extract from matched elements (text, href, or src).
+    """
+
     key: str
     selector: str
     attribute: Literal["text", "href", "src"]
@@ -82,6 +183,7 @@ class SelectorConfig(BaseModel):
     @field_validator("key")
     @classmethod
     def key_not_empty(cls, v: str) -> str:
+        """Validate that the selector key is not empty or whitespace-only."""
         if not v or not v.strip():
             raise ValueError("selector key cannot be empty")
         return v.strip()
@@ -89,6 +191,7 @@ class SelectorConfig(BaseModel):
     @field_validator("selector")
     @classmethod
     def selector_not_empty(cls, v: str) -> str:
+        """Validate that the CSS selector is not empty or whitespace-only."""
         if not v or not v.strip():
             raise ValueError("CSS selector cannot be empty")
         return v.strip()
@@ -96,12 +199,22 @@ class SelectorConfig(BaseModel):
     @field_validator("attribute")
     @classmethod
     def attribute_valid(cls, v: str) -> str:
+        """Validate that the attribute is one of the allowed extraction types."""
         if v not in VALID_ATTRIBUTES:
             raise ValueError(f"attribute must be one of: {', '.join(VALID_ATTRIBUTES)}")
         return v
 
 
 class PipelineCreate(BaseModel):
+    """
+    Request schema for creating a new pipeline.
+
+    Attributes:
+        name: Unique name for the pipeline.
+        target_url: URL to scrape (must be http or https).
+        selectors: List of selector configurations for data extraction.
+    """
+
     name: str
     target_url: HttpUrl
     selectors: list[SelectorConfig]
@@ -109,6 +222,7 @@ class PipelineCreate(BaseModel):
     @field_validator("name")
     @classmethod
     def name_not_empty(cls, v: str) -> str:
+        """Validate pipeline name is not empty and within length limits."""
         if not v or not v.strip():
             raise ValueError("pipeline name cannot be empty")
         stripped = v.strip()
@@ -119,6 +233,7 @@ class PipelineCreate(BaseModel):
     @field_validator("target_url", mode="before")
     @classmethod
     def validate_url_format(cls, v: str) -> str:
+        """Validate URL format and protocol before HttpUrl parsing."""
         if isinstance(v, str):
             stripped = v.strip()
             if not stripped:
@@ -131,12 +246,14 @@ class PipelineCreate(BaseModel):
     @field_validator("selectors")
     @classmethod
     def selectors_not_empty(cls, v: list[SelectorConfig]) -> list[SelectorConfig]:
+        """Validate that at least one selector is provided."""
         if not v:
             raise ValueError("at least one selector is required")
         return v
 
     @model_validator(mode="after")
     def check_duplicate_selector_keys(self) -> "PipelineCreate":
+        """Validate that all selector keys are unique within the pipeline."""
         keys = [s.key for s in self.selectors]
         if len(keys) != len(set(keys)):
             seen = set()
@@ -149,10 +266,22 @@ class PipelineCreate(BaseModel):
         return self
 
     def selectors_to_json(self) -> str:
+        """Serialize the selectors list to a JSON string for database storage."""
         return json.dumps([s.model_dump() for s in self.selectors])
 
 
 class PipelineResponse(BaseModel):
+    """
+    Response schema for a single pipeline.
+
+    Attributes:
+        id: Pipeline identifier.
+        name: Pipeline name.
+        target_url: Target URL for scraping.
+        selectors: List of selector configurations.
+        created_at: Creation timestamp.
+    """
+
     id: int
     name: str
     target_url: str
@@ -163,6 +292,7 @@ class PipelineResponse(BaseModel):
 
     @classmethod
     def from_orm_model(cls, pipeline: Pipeline) -> "PipelineResponse":
+        """Create a response instance from a Pipeline ORM model."""
         selectors_data = json.loads(pipeline.selectors_json)
         selectors = [SelectorConfig(**s) for s in selectors_data]
         return cls(
@@ -175,6 +305,18 @@ class PipelineResponse(BaseModel):
 
 
 class PipelineWithStatusResponse(BaseModel):
+    """
+    Response schema for a pipeline including its latest job status.
+
+    Attributes:
+        id: Pipeline identifier.
+        name: Pipeline name.
+        target_url: Target URL for scraping.
+        selectors: List of selector configurations.
+        created_at: Creation timestamp.
+        latest_status: Status of the most recent job run, if any.
+    """
+
     id: int
     name: str
     target_url: str
@@ -185,7 +327,10 @@ class PipelineWithStatusResponse(BaseModel):
     model_config = {"from_attributes": True}
 
     @classmethod
-    def from_orm_with_status(cls, pipeline: Pipeline, latest_status: str | None) -> "PipelineWithStatusResponse":
+    def from_orm_with_status(
+        cls, pipeline: Pipeline, latest_status: str | None
+    ) -> "PipelineWithStatusResponse":
+        """Create a response instance from a Pipeline ORM model with status."""
         selectors_data = json.loads(pipeline.selectors_json)
         selectors = [SelectorConfig(**s) for s in selectors_data]
         return cls(
@@ -199,6 +344,16 @@ class PipelineWithStatusResponse(BaseModel):
 
 
 class TriggerResponse(BaseModel):
+    """
+    Response schema for pipeline trigger requests.
+
+    Attributes:
+        job_id: Identifier of the created job run.
+        pipeline_id: Identifier of the triggered pipeline.
+        status: Initial status of the job (PENDING).
+        message: Human-readable confirmation message.
+    """
+
     job_id: int
     pipeline_id: int
     status: str
@@ -206,6 +361,19 @@ class TriggerResponse(BaseModel):
 
 
 class JobRunResponse(BaseModel):
+    """
+    Response schema for a single job run.
+
+    Attributes:
+        id: Job run identifier.
+        pipeline_id: Parent pipeline identifier.
+        status: Current job status.
+        started_at: Execution start timestamp.
+        completed_at: Execution completion timestamp.
+        extracted_data: Scraped data (on success).
+        error_message: Error details (on failure).
+    """
+
     id: int
     pipeline_id: int
     status: str
@@ -218,6 +386,7 @@ class JobRunResponse(BaseModel):
 
     @classmethod
     def from_orm_model(cls, job_run: JobRun) -> "JobRunResponse":
+        """Create a response instance from a JobRun ORM model."""
         extracted = None
         if job_run.extracted_data:
             try:
@@ -236,6 +405,21 @@ class JobRunResponse(BaseModel):
 
 
 class HistoryResponse(BaseModel):
+    """
+    Response schema for job history entries with pipeline details.
+
+    Attributes:
+        id: Job run identifier.
+        pipeline_id: Parent pipeline identifier.
+        pipeline_name: Name of the parent pipeline.
+        target_url: URL that was scraped.
+        status: Final job status.
+        started_at: Execution start timestamp.
+        completed_at: Execution completion timestamp.
+        extracted_data: Scraped data (on success).
+        error_message: Error details (on failure).
+    """
+
     id: int
     pipeline_id: int
     pipeline_name: str
@@ -249,7 +433,10 @@ class HistoryResponse(BaseModel):
     model_config = {"from_attributes": True}
 
     @classmethod
-    def from_job_and_pipeline(cls, job_run: JobRun, pipeline: Pipeline) -> "HistoryResponse":
+    def from_job_and_pipeline(
+        cls, job_run: JobRun, pipeline: Pipeline
+    ) -> "HistoryResponse":
+        """Create a response instance from JobRun and Pipeline ORM models."""
         extracted = None
         if job_run.extracted_data:
             try:
@@ -269,13 +456,23 @@ class HistoryResponse(BaseModel):
         )
 
 
+# =============================================================================
+# Database Initialization
+# =============================================================================
+
 async def init_db():
+    """Initialize the database by creating all tables defined in the ORM models."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """
+    FastAPI lifespan context manager for startup and shutdown events.
+
+    On startup, initializes the database tables.
+    """
     await init_db()
     yield
 
@@ -284,14 +481,496 @@ app = FastAPI(lifespan=lifespan)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    """
+    Dependency that provides an async database session.
+
+    Yields:
+        AsyncSession: Database session that is automatically closed after use.
+    """
     async with async_session() as session:
         yield session
 
 
+# =============================================================================
+# Scraper Engine
+# =============================================================================
+
+class ScrapingError(Exception):
+    """Exception raised when scraping fails due to network or HTTP errors."""
+
+    pass
+
+
+class SelectorError(Exception):
+    """Exception raised when a CSS selector fails to match or extract data."""
+
+    def __init__(self, selector_key: str, selector_css: str, message: str):
+        """
+        Initialize a SelectorError with detailed context.
+
+        Args:
+            selector_key: The key name of the failing selector.
+            selector_css: The CSS selector string that failed.
+            message: Description of what went wrong.
+        """
+        self.selector_key = selector_key
+        self.selector_css = selector_css
+        self.message = message
+        super().__init__(f"Selector '{selector_key}' ({selector_css}): {message}")
+
+
+class ScrapeResult:
+    """
+    Container for scraping results including data, errors, and warnings.
+
+    Accumulates extracted data from multiple selectors along with any
+    errors or warnings encountered during extraction.
+    """
+
+    def __init__(self):
+        """Initialize an empty ScrapeResult."""
+        self.data: dict[str, list[str]] = {}
+        self.errors: list[str] = []
+        self.warnings: list[str] = []
+
+    def add_data(self, key: str, values: list[str]) -> None:
+        """Add extracted values for a selector key."""
+        self.data[key] = values
+
+    def add_error(self, error: str) -> None:
+        """Record a non-fatal error that occurred during extraction."""
+        self.errors.append(error)
+
+    def add_warning(self, warning: str) -> None:
+        """Record a warning (e.g., selector matched no elements)."""
+        self.warnings.append(warning)
+
+    def has_errors(self) -> bool:
+        """Return True if any errors were recorded."""
+        return len(self.errors) > 0
+
+    def has_warnings(self) -> bool:
+        """Return True if any warnings were recorded."""
+        return len(self.warnings) > 0
+
+    def has_any_data(self) -> bool:
+        """Return True if any selector extracted at least one value."""
+        return any(len(v) > 0 for v in self.data.values())
+
+    def to_dict(self) -> dict:
+        """Convert the result to a dictionary for JSON serialization."""
+        result: dict = {"data": self.data}
+        if self.errors:
+            result["_errors"] = self.errors
+        if self.warnings:
+            result["_warnings"] = self.warnings
+        return result
+
+
+def extract_with_selector(
+    soup: BeautifulSoup, selector_config: SelectorConfig, result: ScrapeResult
+) -> None:
+    """
+    Extract data from HTML using a single selector configuration.
+
+    Matches elements using the CSS selector and extracts the specified
+    attribute (text content, href, or src) from each matched element.
+
+    Args:
+        soup: Parsed HTML document.
+        selector_config: Selector configuration with key, CSS, and attribute.
+        result: ScrapeResult to accumulate extracted data and errors.
+    """
+    try:
+        elements = soup.select(selector_config.selector)
+    except Exception as e:
+        error_msg = (
+            f"Invalid CSS selector '{selector_config.selector}' for key "
+            f"'{selector_config.key}': {type(e).__name__}: {e}"
+        )
+        result.add_error(error_msg)
+        result.add_data(selector_config.key, [])
+        return
+
+    if not elements:
+        warning_msg = (
+            f"Selector '{selector_config.selector}' for key '{selector_config.key}' "
+            f"found no matching elements"
+        )
+        result.add_warning(warning_msg)
+        result.add_data(selector_config.key, [])
+        return
+
+    values: list[str] = []
+    for idx, element in enumerate(elements):
+        try:
+            if selector_config.attribute == "text":
+                text_content = element.get_text(strip=True)
+                values.append(text_content)
+            elif selector_config.attribute == "href":
+                href = element.get("href")
+                if href:
+                    values.append(str(href))
+            elif selector_config.attribute == "src":
+                src = element.get("src")
+                if src:
+                    values.append(str(src))
+        except Exception as e:
+            error_msg = (
+                f"Error extracting '{selector_config.attribute}' from element {idx} "
+                f"for key '{selector_config.key}': {type(e).__name__}: {e}"
+            )
+            result.add_error(error_msg)
+
+    result.add_data(selector_config.key, values)
+
+
+async def scrape_url(url: str, selectors: list[SelectorConfig]) -> dict:
+    """
+    Fetch a URL and extract data using the provided selectors.
+
+    Performs an async HTTP GET request, parses the HTML response, and applies
+    each selector to extract data. Handles network errors, timeouts, HTTP
+    errors, and parsing failures with descriptive error messages.
+
+    Args:
+        url: The URL to fetch and scrape.
+        selectors: List of selector configurations defining what to extract.
+
+    Returns:
+        Dictionary containing extracted data and any errors/warnings.
+
+    Raises:
+        ScrapingError: If the request fails or all selectors fail.
+    """
+    timeout = httpx.Timeout(
+        connect=HTTPX_CONNECT_TIMEOUT,
+        read=HTTPX_READ_TIMEOUT,
+        write=HTTPX_WRITE_TIMEOUT,
+        pool=HTTPX_POOL_TIMEOUT,
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            response = await client.get(url)
+    except httpx.TimeoutException as e:
+        timeout_type = type(e).__name__
+        raise ScrapingError(
+            f"Request timed out while fetching '{url}': {timeout_type}. "
+            f"The server did not respond within the configured timeout limits "
+            f"(connect: {HTTPX_CONNECT_TIMEOUT}s, read: {HTTPX_READ_TIMEOUT}s)."
+        ) from e
+    except httpx.ConnectError as e:
+        raise ScrapingError(
+            f"Connection failed to '{url}': Unable to establish a connection. "
+            f"The host may be unreachable, the DNS lookup may have failed, "
+            f"or the connection was refused. Details: {e}"
+        ) from e
+    except httpx.RequestError as e:
+        error_type = type(e).__name__
+        raise ScrapingError(
+            f"Request error while fetching '{url}': {error_type}. Details: {e}"
+        ) from e
+
+    if not response.is_success:
+        raise ScrapingError(
+            f"HTTP error {response.status_code} ({response.reason_phrase}) "
+            f"while fetching '{url}'. Expected a successful response (2xx status code)."
+        )
+
+    html_content = response.text
+    if not html_content or not html_content.strip():
+        raise ScrapingError(f"Empty response body received from '{url}'")
+
+    try:
+        soup = BeautifulSoup(html_content, "html.parser")
+    except Exception as e:
+        raise ScrapingError(
+            f"Failed to parse HTML from '{url}': {type(e).__name__}: {e}. "
+            f"The response may contain malformed HTML that cannot be processed."
+        ) from e
+
+    if soup.find() is None:
+        raise ScrapingError(
+            f"No valid HTML structure found in response from '{url}'. "
+            f"The content may be empty, malformed, or not HTML."
+        )
+
+    result = ScrapeResult()
+
+    for selector_config in selectors:
+        extract_with_selector(soup, selector_config, result)
+
+    if result.has_errors() and not result.has_any_data():
+        raise ScrapingError(
+            f"All selectors failed with errors:\n" + "\n".join(result.errors)
+        )
+
+    return result.to_dict()
+
+
+# =============================================================================
+# Background Worker
+# =============================================================================
+
+async def run_pipeline_job(pipeline_id: int, job_run_id: int) -> None:
+    """
+    Execute a pipeline scraping job in the background.
+
+    Implements the job lifecycle state machine:
+    1. Retrieves the job and pipeline from the database
+    2. Transitions job to RUNNING state
+    3. Executes the scraping operation
+    4. Transitions to COMPLETED (with data) or FAILED (with error message)
+
+    Args:
+        pipeline_id: ID of the pipeline to execute.
+        job_run_id: ID of the job run record to update.
+    """
+    async with async_session() as db:
+        result = await db.execute(select(JobRun).where(JobRun.id == job_run_id))
+        job_run = result.scalar_one_or_none()
+        if job_run is None:
+            return
+
+        result = await db.execute(select(Pipeline).where(Pipeline.id == pipeline_id))
+        pipeline = result.scalar_one_or_none()
+        if pipeline is None:
+            job_run.status = "FAILED"
+            job_run.completed_at = datetime.utcnow()
+            job_run.error_message = f"Pipeline with id {pipeline_id} not found"
+            await db.commit()
+            return
+
+        job_run.status = "RUNNING"
+        job_run.started_at = datetime.utcnow()
+        await db.commit()
+
+        try:
+            selectors_data = json.loads(pipeline.selectors_json)
+            selectors = [SelectorConfig(**s) for s in selectors_data]
+            extracted = await scrape_url(pipeline.target_url, selectors)
+            job_run.extracted_data = json.dumps(extracted)
+            job_run.status = "COMPLETED"
+            job_run.completed_at = datetime.utcnow()
+        except ScrapingError as e:
+            job_run.status = "FAILED"
+            job_run.completed_at = datetime.utcnow()
+            job_run.error_message = str(e)
+        except Exception:
+            job_run.status = "FAILED"
+            job_run.completed_at = datetime.utcnow()
+            job_run.error_message = f"Unexpected error: {traceback.format_exc()}"
+
+        await db.commit()
+
+
+# =============================================================================
+# API Endpoints
+# =============================================================================
+
 @app.get("/health")
 async def health():
+    """Health check endpoint to verify the service is running."""
     return {"status": "ok"}
 
+
+@app.post("/api/pipelines", response_model=PipelineResponse, status_code=201)
+async def create_pipeline(
+    payload: PipelineCreate,
+    db: AsyncSession = Depends(get_db),
+) -> PipelineResponse:
+    """
+    Create a new scraping pipeline.
+
+    Args:
+        payload: Pipeline configuration including name, URL, and selectors.
+        db: Database session (injected).
+
+    Returns:
+        The created pipeline with its assigned ID.
+
+    Raises:
+        HTTPException: 409 if a pipeline with the same name already exists.
+    """
+    existing = await db.execute(select(Pipeline).where(Pipeline.name == payload.name))
+    if existing.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"A pipeline with name '{payload.name}' already exists",
+        )
+
+    pipeline = Pipeline(
+        name=payload.name,
+        target_url=str(payload.target_url),
+        selectors_json=payload.selectors_to_json(),
+    )
+    db.add(pipeline)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"A pipeline with name '{payload.name}' already exists",
+        )
+    await db.refresh(pipeline)
+    return PipelineResponse.from_orm_model(pipeline)
+
+
+@app.get("/api/pipelines", response_model=list[PipelineWithStatusResponse])
+async def list_pipelines(
+    db: AsyncSession = Depends(get_db),
+) -> list[PipelineWithStatusResponse]:
+    """
+    List all pipelines with their latest job status.
+
+    Uses a subquery to efficiently fetch the most recent job status for each
+    pipeline in a single database query.
+
+    Args:
+        db: Database session (injected).
+
+    Returns:
+        List of all pipelines with latest_status populated.
+    """
+    max_id_subquery = (
+        select(JobRun.pipeline_id, func.max(JobRun.id).label("max_id"))
+        .group_by(JobRun.pipeline_id)
+        .subquery()
+    )
+
+    latest_status_subquery = (
+        select(JobRun.pipeline_id, JobRun.status)
+        .join(max_id_subquery, JobRun.id == max_id_subquery.c.max_id)
+        .subquery()
+    )
+
+    query = (
+        select(Pipeline, latest_status_subquery.c.status)
+        .outerjoin(
+            latest_status_subquery,
+            Pipeline.id == latest_status_subquery.c.pipeline_id,
+        )
+        .order_by(Pipeline.id)
+    )
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    return [
+        PipelineWithStatusResponse.from_orm_with_status(pipeline, latest_status)
+        for pipeline, latest_status in rows
+    ]
+
+
+@app.post(
+    "/api/pipelines/{pipeline_id}/trigger",
+    response_model=TriggerResponse,
+    status_code=202,
+)
+async def trigger_pipeline(
+    pipeline_id: int,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+) -> TriggerResponse:
+    """
+    Trigger execution of a pipeline.
+
+    Creates a new job run in PENDING state and schedules the background worker.
+    Returns immediately with HTTP 202 Accepted.
+
+    Args:
+        pipeline_id: ID of the pipeline to trigger.
+        background_tasks: FastAPI background task manager (injected).
+        db: Database session (injected).
+
+    Returns:
+        Trigger response with job ID and initial status.
+
+    Raises:
+        HTTPException: 404 if the pipeline does not exist.
+    """
+    result = await db.execute(select(Pipeline).where(Pipeline.id == pipeline_id))
+    pipeline = result.scalar_one_or_none()
+    if pipeline is None:
+        raise HTTPException(
+            status_code=404, detail=f"Pipeline with id {pipeline_id} not found"
+        )
+
+    job_run = JobRun(pipeline_id=pipeline_id, status="PENDING")
+    db.add(job_run)
+    await db.commit()
+    await db.refresh(job_run)
+
+    background_tasks.add_task(run_pipeline_job, pipeline_id, job_run.id)
+
+    return TriggerResponse(
+        job_id=job_run.id, pipeline_id=pipeline_id, status=job_run.status
+    )
+
+
+@app.get("/api/history", response_model=list[HistoryResponse])
+async def get_history(
+    db: AsyncSession = Depends(get_db),
+) -> list[HistoryResponse]:
+    """
+    Get the 30 most recent job runs across all pipelines.
+
+    Results are ordered by start time (most recent first), with jobs that
+    haven't started yet appearing at the end.
+
+    Args:
+        db: Database session (injected).
+
+    Returns:
+        List of recent job runs with pipeline details.
+    """
+    query = (
+        select(JobRun, Pipeline)
+        .join(Pipeline, JobRun.pipeline_id == Pipeline.id)
+        .order_by(JobRun.started_at.desc().nulls_last(), JobRun.id.desc())
+        .limit(30)
+    )
+    result = await db.execute(query)
+    rows = result.all()
+
+    return [
+        HistoryResponse.from_job_and_pipeline(job_run, pipeline)
+        for job_run, pipeline in rows
+    ]
+
+
+@app.delete("/api/pipelines/{pipeline_id}", status_code=204)
+async def delete_pipeline(
+    pipeline_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """
+    Delete a pipeline and all its associated job runs.
+
+    Args:
+        pipeline_id: ID of the pipeline to delete.
+        db: Database session (injected).
+
+    Raises:
+        HTTPException: 404 if the pipeline does not exist.
+    """
+    result = await db.execute(select(Pipeline).where(Pipeline.id == pipeline_id))
+    pipeline = result.scalar_one_or_none()
+    if pipeline is None:
+        raise HTTPException(
+            status_code=404, detail=f"Pipeline with id {pipeline_id} not found"
+        )
+
+    await db.execute(delete(JobRun).where(JobRun.pipeline_id == pipeline_id))
+    await db.delete(pipeline)
+    await db.commit()
+
+
+# =============================================================================
+# Dashboard UI
+# =============================================================================
 
 DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="en">
@@ -979,318 +1658,5 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
+    """Serve the CrawlFlow dashboard single-page application."""
     return HTMLResponse(content=DASHBOARD_HTML)
-
-
-@app.post("/api/pipelines", response_model=PipelineResponse, status_code=201)
-async def create_pipeline(
-    payload: PipelineCreate,
-    db: AsyncSession = Depends(get_db),
-) -> PipelineResponse:
-    existing = await db.execute(select(Pipeline).where(Pipeline.name == payload.name))
-    if existing.scalar_one_or_none() is not None:
-        raise HTTPException(
-            status_code=409,
-            detail=f"A pipeline with name '{payload.name}' already exists"
-        )
-
-    pipeline = Pipeline(
-        name=payload.name,
-        target_url=str(payload.target_url),
-        selectors_json=payload.selectors_to_json(),
-    )
-    db.add(pipeline)
-    try:
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail=f"A pipeline with name '{payload.name}' already exists"
-        )
-    await db.refresh(pipeline)
-    return PipelineResponse.from_orm_model(pipeline)
-
-
-class ScrapingError(Exception):
-    pass
-
-
-class SelectorError(Exception):
-    def __init__(self, selector_key: str, selector_css: str, message: str):
-        self.selector_key = selector_key
-        self.selector_css = selector_css
-        self.message = message
-        super().__init__(f"Selector '{selector_key}' ({selector_css}): {message}")
-
-
-class ScrapeResult:
-    def __init__(self):
-        self.data: dict[str, list[str]] = {}
-        self.errors: list[str] = []
-        self.warnings: list[str] = []
-
-    def add_data(self, key: str, values: list[str]) -> None:
-        self.data[key] = values
-
-    def add_error(self, error: str) -> None:
-        self.errors.append(error)
-
-    def add_warning(self, warning: str) -> None:
-        self.warnings.append(warning)
-
-    def has_errors(self) -> bool:
-        return len(self.errors) > 0
-
-    def has_warnings(self) -> bool:
-        return len(self.warnings) > 0
-
-    def has_any_data(self) -> bool:
-        return any(len(v) > 0 for v in self.data.values())
-
-    def to_dict(self) -> dict:
-        result: dict = {"data": self.data}
-        if self.errors:
-            result["_errors"] = self.errors
-        if self.warnings:
-            result["_warnings"] = self.warnings
-        return result
-
-
-def extract_with_selector(
-    soup: BeautifulSoup, selector_config: SelectorConfig, result: ScrapeResult
-) -> None:
-    try:
-        elements = soup.select(selector_config.selector)
-    except Exception as e:
-        error_msg = (
-            f"Invalid CSS selector '{selector_config.selector}' for key '{selector_config.key}': "
-            f"{type(e).__name__}: {e}"
-        )
-        result.add_error(error_msg)
-        result.add_data(selector_config.key, [])
-        return
-
-    if not elements:
-        warning_msg = (
-            f"Selector '{selector_config.selector}' for key '{selector_config.key}' "
-            f"found no matching elements"
-        )
-        result.add_warning(warning_msg)
-        result.add_data(selector_config.key, [])
-        return
-
-    values: list[str] = []
-    for idx, element in enumerate(elements):
-        try:
-            if selector_config.attribute == "text":
-                text_content = element.get_text(strip=True)
-                values.append(text_content)
-            elif selector_config.attribute == "href":
-                href = element.get("href")
-                if href:
-                    values.append(str(href))
-            elif selector_config.attribute == "src":
-                src = element.get("src")
-                if src:
-                    values.append(str(src))
-        except Exception as e:
-            error_msg = (
-                f"Error extracting '{selector_config.attribute}' from element {idx} "
-                f"for key '{selector_config.key}': {type(e).__name__}: {e}"
-            )
-            result.add_error(error_msg)
-
-    result.add_data(selector_config.key, values)
-
-
-async def scrape_url(url: str, selectors: list[SelectorConfig]) -> dict:
-    timeout = httpx.Timeout(
-        connect=HTTPX_CONNECT_TIMEOUT,
-        read=HTTPX_READ_TIMEOUT,
-        write=HTTPX_WRITE_TIMEOUT,
-        pool=HTTPX_POOL_TIMEOUT,
-    )
-
-    try:
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            response = await client.get(url)
-    except httpx.TimeoutException as e:
-        timeout_type = type(e).__name__
-        raise ScrapingError(
-            f"Request timed out while fetching '{url}': {timeout_type}. "
-            f"The server did not respond within the configured timeout limits "
-            f"(connect: {HTTPX_CONNECT_TIMEOUT}s, read: {HTTPX_READ_TIMEOUT}s)."
-        ) from e
-    except httpx.ConnectError as e:
-        raise ScrapingError(
-            f"Connection failed to '{url}': Unable to establish a connection. "
-            f"The host may be unreachable, the DNS lookup may have failed, "
-            f"or the connection was refused. Details: {e}"
-        ) from e
-    except httpx.RequestError as e:
-        error_type = type(e).__name__
-        raise ScrapingError(
-            f"Request error while fetching '{url}': {error_type}. Details: {e}"
-        ) from e
-
-    if not response.is_success:
-        raise ScrapingError(
-            f"HTTP error {response.status_code} ({response.reason_phrase}) "
-            f"while fetching '{url}'. Expected a successful response (2xx status code)."
-        )
-
-    html_content = response.text
-    if not html_content or not html_content.strip():
-        raise ScrapingError(f"Empty response body received from '{url}'")
-
-    try:
-        soup = BeautifulSoup(html_content, "html.parser")
-    except Exception as e:
-        raise ScrapingError(
-            f"Failed to parse HTML from '{url}': {type(e).__name__}: {e}. "
-            f"The response may contain malformed HTML that cannot be processed."
-        ) from e
-
-    if soup.find() is None:
-        raise ScrapingError(
-            f"No valid HTML structure found in response from '{url}'. "
-            f"The content may be empty, malformed, or not HTML."
-        )
-
-    result = ScrapeResult()
-
-    for selector_config in selectors:
-        extract_with_selector(soup, selector_config, result)
-
-    if result.has_errors() and not result.has_any_data():
-        raise ScrapingError(
-            f"All selectors failed with errors:\n" + "\n".join(result.errors)
-        )
-
-    return result.to_dict()
-
-
-async def run_pipeline_job(pipeline_id: int, job_run_id: int) -> None:
-    async with async_session() as db:
-        result = await db.execute(select(JobRun).where(JobRun.id == job_run_id))
-        job_run = result.scalar_one_or_none()
-        if job_run is None:
-            return
-
-        result = await db.execute(select(Pipeline).where(Pipeline.id == pipeline_id))
-        pipeline = result.scalar_one_or_none()
-        if pipeline is None:
-            job_run.status = "FAILED"
-            job_run.completed_at = datetime.utcnow()
-            job_run.error_message = f"Pipeline with id {pipeline_id} not found"
-            await db.commit()
-            return
-
-        job_run.status = "RUNNING"
-        job_run.started_at = datetime.utcnow()
-        await db.commit()
-
-        try:
-            selectors_data = json.loads(pipeline.selectors_json)
-            selectors = [SelectorConfig(**s) for s in selectors_data]
-            extracted = await scrape_url(pipeline.target_url, selectors)
-            job_run.extracted_data = json.dumps(extracted)
-            job_run.status = "COMPLETED"
-            job_run.completed_at = datetime.utcnow()
-        except ScrapingError as e:
-            job_run.status = "FAILED"
-            job_run.completed_at = datetime.utcnow()
-            job_run.error_message = str(e)
-        except Exception:
-            job_run.status = "FAILED"
-            job_run.completed_at = datetime.utcnow()
-            job_run.error_message = f"Unexpected error: {traceback.format_exc()}"
-
-        await db.commit()
-
-
-@app.get("/api/pipelines", response_model=list[PipelineWithStatusResponse])
-async def list_pipelines(
-    db: AsyncSession = Depends(get_db),
-) -> list[PipelineWithStatusResponse]:
-    max_id_subquery = (
-        select(JobRun.pipeline_id, func.max(JobRun.id).label("max_id"))
-        .group_by(JobRun.pipeline_id)
-        .subquery()
-    )
-
-    latest_status_subquery = (
-        select(JobRun.pipeline_id, JobRun.status)
-        .join(max_id_subquery, JobRun.id == max_id_subquery.c.max_id)
-        .subquery()
-    )
-
-    query = (
-        select(Pipeline, latest_status_subquery.c.status)
-        .outerjoin(latest_status_subquery, Pipeline.id == latest_status_subquery.c.pipeline_id)
-        .order_by(Pipeline.id)
-    )
-
-    result = await db.execute(query)
-    rows = result.all()
-
-    return [
-        PipelineWithStatusResponse.from_orm_with_status(pipeline, latest_status)
-        for pipeline, latest_status in rows
-    ]
-
-
-@app.post("/api/pipelines/{pipeline_id}/trigger", response_model=TriggerResponse, status_code=202)
-async def trigger_pipeline(
-    pipeline_id: int,
-    background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db),
-) -> TriggerResponse:
-    result = await db.execute(select(Pipeline).where(Pipeline.id == pipeline_id))
-    pipeline = result.scalar_one_or_none()
-    if pipeline is None:
-        raise HTTPException(status_code=404, detail=f"Pipeline with id {pipeline_id} not found")
-
-    job_run = JobRun(pipeline_id=pipeline_id, status="PENDING")
-    db.add(job_run)
-    await db.commit()
-    await db.refresh(job_run)
-
-    background_tasks.add_task(run_pipeline_job, pipeline_id, job_run.id)
-
-    return TriggerResponse(job_id=job_run.id, pipeline_id=pipeline_id, status=job_run.status)
-
-
-@app.get("/api/history", response_model=list[HistoryResponse])
-async def get_history(
-    db: AsyncSession = Depends(get_db),
-) -> list[HistoryResponse]:
-    query = (
-        select(JobRun, Pipeline)
-        .join(Pipeline, JobRun.pipeline_id == Pipeline.id)
-        .order_by(JobRun.started_at.desc().nulls_last(), JobRun.id.desc())
-        .limit(30)
-    )
-    result = await db.execute(query)
-    rows = result.all()
-
-    return [
-        HistoryResponse.from_job_and_pipeline(job_run, pipeline)
-        for job_run, pipeline in rows
-    ]
-
-
-@app.delete("/api/pipelines/{pipeline_id}", status_code=204)
-async def delete_pipeline(
-    pipeline_id: int,
-    db: AsyncSession = Depends(get_db),
-) -> None:
-    result = await db.execute(select(Pipeline).where(Pipeline.id == pipeline_id))
-    pipeline = result.scalar_one_or_none()
-    if pipeline is None:
-        raise HTTPException(status_code=404, detail=f"Pipeline with id {pipeline_id} not found")
-
-    await db.execute(delete(JobRun).where(JobRun.pipeline_id == pipeline_id))
-    await db.delete(pipeline)
-    await db.commit()
