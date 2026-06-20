@@ -32,7 +32,7 @@ API Endpoints:
 import json
 import traceback
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from collections.abc import AsyncGenerator
 from typing import Literal
 
@@ -121,7 +121,7 @@ class Pipeline(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     target_url: Mapped[str] = mapped_column(Text, nullable=False)
     selectors_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
 
     job_runs: Mapped[list["JobRun"]] = relationship(back_populates="pipeline")
 
@@ -737,13 +737,13 @@ async def run_pipeline_job(pipeline_id: int, job_run_id: int) -> None:
         pipeline = result.scalar_one_or_none()
         if pipeline is None:
             job_run.status = "FAILED"
-            job_run.completed_at = datetime.utcnow()
+            job_run.completed_at = datetime.now(timezone.utc)
             job_run.error_message = f"Pipeline with id {pipeline_id} not found"
             await db.commit()
             return
 
         job_run.status = "RUNNING"
-        job_run.started_at = datetime.utcnow()
+        job_run.started_at = datetime.now(timezone.utc)
         await db.commit()
 
         try:
@@ -752,14 +752,14 @@ async def run_pipeline_job(pipeline_id: int, job_run_id: int) -> None:
             extracted = await scrape_url(pipeline.target_url, selectors)
             job_run.extracted_data = json.dumps(extracted)
             job_run.status = "COMPLETED"
-            job_run.completed_at = datetime.utcnow()
+            job_run.completed_at = datetime.now(timezone.utc)
         except ScrapingError as e:
             job_run.status = "FAILED"
-            job_run.completed_at = datetime.utcnow()
+            job_run.completed_at = datetime.now(timezone.utc)
             job_run.error_message = str(e)
         except Exception:
             job_run.status = "FAILED"
-            job_run.completed_at = datetime.utcnow()
+            job_run.completed_at = datetime.now(timezone.utc)
             job_run.error_message = f"Unexpected error: {traceback.format_exc()}"
 
         await db.commit()
